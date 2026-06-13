@@ -2,13 +2,7 @@
   "name": "file-transfer-station",
   "version": "0.1.0",
   "private": true,
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.5.2",
-      "onFail": "download"
-    }
-  },
+  "packageManager": "pnpm@11.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
