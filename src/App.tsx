@@ -62,10 +62,19 @@ type DetailItem = {
 };
 
 const navItems = ["Direct", "STUN", "TURN", "SFU", "R2"];
-const rtcConfig: RTCConfiguration = { iceServers: [] };
+const rtcConfig: RTCConfiguration = {
+  iceCandidatePoolSize: 4,
+  iceServers: [
+    {
+      urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"],
+    },
+  ],
+};
 const chunkSize = 64 * 1024;
 const highWaterMark = 8 * 1024 * 1024;
 const lowWaterMark = 2 * 1024 * 1024;
+const iceGatheringTimeoutMs = 10000;
+const channelOpenTimeoutMs = 18000;
 
 function Panel({
   children,
@@ -157,6 +166,25 @@ function parseSignal(json: string): SignalPayload {
   return payload;
 }
 
+function summarizeCandidates(description: RTCSessionDescriptionInit | null) {
+  const sdp = description?.sdp ?? "";
+  const summary = { host: 0, srflx: 0, relay: 0, total: 0 };
+  const candidates = sdp.match(/^a=candidate:.*$/gm) ?? [];
+  for (const candidate of candidates) {
+    summary.total += 1;
+    if (/\styp host(\s|$)/.test(candidate)) summary.host += 1;
+    if (/\styp srflx(\s|$)/.test(candidate)) summary.srflx += 1;
+    if (/\styp relay(\s|$)/.test(candidate)) summary.relay += 1;
+  }
+  return summary;
+}
+
+function formatCandidateSummary(description: RTCSessionDescriptionInit | null) {
+  const summary = summarizeCandidates(description);
+  if (summary.total === 0) return "未收集到候选地址";
+  return `${summary.total} 个候选地址，host ${summary.host}，公网 ${summary.srflx}，relay ${summary.relay}`;
+}
+
 function createPeerConnection(
   onState: (peer: RTCPeerConnection) => void,
   onError: (message: string) => void,
@@ -173,7 +201,7 @@ function createPeerConnection(
   return peer;
 }
 
-function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = 3000) {
+function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = iceGatheringTimeoutMs) {
   if (peer.iceGatheringState === "complete") return Promise.resolve();
 
   return new Promise<void>((resolve) => {
@@ -190,6 +218,33 @@ function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = 3000) {
     };
     const timer = window.setTimeout(done, timeoutMs);
     peer.addEventListener("icegatheringstatechange", onChange);
+  });
+}
+
+function waitForDataChannelOpen(channel: RTCDataChannel, timeoutMs = channelOpenTimeoutMs) {
+  if (channel.readyState === "open") return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    let finished = false;
+    const done = (error?: Error) => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timer);
+      channel.removeEventListener("open", onOpen);
+      channel.removeEventListener("close", onClose);
+      channel.removeEventListener("error", onError);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onOpen = () => done();
+    const onClose = () => done(new Error("DataChannel 已关闭，连接没有建立。"));
+    const onError = () => done(new Error("DataChannel 发生错误，连接没有建立。"));
+    const timer = window.setTimeout(() => {
+      done(new Error("DataChannel 没有打开。当前网络可能无法直连，请确认两端重新生成并交换最新 Offer/Answer；如果仍失败，需要 STUN/TURN 模式。"));
+    }, timeoutMs);
+    channel.addEventListener("open", onOpen);
+    channel.addEventListener("close", onClose);
+    channel.addEventListener("error", onError);
   });
 }
 
@@ -532,7 +587,7 @@ export default function App() {
 
     try {
       setSenderError("");
-      setSenderStatus("正在创建 WebRTC Offer 并收集本地候选地址...");
+      setSenderStatus("正在创建 WebRTC Offer，并收集本地和公网候选地址...");
       setSenderOffer("");
       setSenderAnswerInput("");
       setSenderProgress(0);
@@ -558,7 +613,7 @@ export default function App() {
         createdAt: Date.now(),
       });
       setSenderOffer(encoded);
-      setSenderStatus("Offer 已生成，复制给接收方。");
+      setSenderStatus(`Offer 已生成，${formatCandidateSummary(peer.localDescription)}。复制给接收方。`);
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "生成 Offer 失败。");
     }
@@ -567,7 +622,7 @@ export default function App() {
   async function createAnswerFromOffer() {
     try {
       setReceiverError("");
-      setReceiverStatus("正在读取 Offer 并生成 Answer...");
+      setReceiverStatus("正在读取 Offer，并收集接收方候选地址...");
       setReceiverAnswer("");
       setReceiverProgress(0);
       setReceivedBytes(0);
@@ -601,7 +656,7 @@ export default function App() {
         createdAt: Date.now(),
       });
       setReceiverAnswer(encoded);
-      setReceiverStatus("Answer 已生成，复制给发送方。");
+      setReceiverStatus(`Answer 已生成，${formatCandidateSummary(peer.localDescription)}。复制给发送方。`);
     } catch (error) {
       setReceiverError(error instanceof Error ? error.message : "生成 Answer 失败。");
     }
@@ -623,9 +678,12 @@ export default function App() {
       setSenderStatus("正在应用 Answer，等待 DataChannel 打开...");
       await peer.setRemoteDescription(payload.description);
       updateSenderPeerState(peer);
-      if (senderChannelRef.current?.readyState === "open") {
-        await sendSelectedFile();
+      const channel = senderChannelRef.current;
+      if (!channel) {
+        throw new Error("发送通道不存在，请重新生成 Offer。");
       }
+      await waitForDataChannelOpen(channel);
+      await sendSelectedFile();
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "应用 Answer 失败。");
     }
