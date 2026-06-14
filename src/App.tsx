@@ -22,6 +22,7 @@ type SignalPayload = {
   kind: "direct-webrtc-signal";
   role: "offer" | "answer";
   description: RTCSessionDescriptionInit;
+  candidates?: RTCIceCandidateInit[];
   createdAt: number;
 };
 
@@ -159,11 +160,23 @@ function parseSignal(json: string): SignalPayload {
   return payload;
 }
 
-function summarizeCandidates(description: RTCSessionDescriptionInit | null) {
+function summarizeCandidates(
+  description: RTCSessionDescriptionInit | null,
+  candidates: RTCIceCandidateInit[] = [],
+) {
   const sdp = description?.sdp ?? "";
   const summary = { host: 0, srflx: 0, relay: 0, total: 0 };
-  const candidates = sdp.match(/^a=candidate:.*$/gm) ?? [];
-  for (const candidate of candidates) {
+  const candidateLines = [
+    ...(sdp.match(/^a=candidate:.*$/gm) ?? []).map((candidate) =>
+      candidate.replace(/^a=/, ""),
+    ),
+    ...candidates
+      .map((candidate) => candidate.candidate)
+      .filter((candidate): candidate is string => Boolean(candidate)),
+  ];
+  const uniqueCandidates = new Set(candidateLines);
+
+  for (const candidate of uniqueCandidates) {
     summary.total += 1;
     if (/\styp host(\s|$)/.test(candidate)) summary.host += 1;
     if (/\styp srflx(\s|$)/.test(candidate)) summary.srflx += 1;
@@ -172,16 +185,53 @@ function summarizeCandidates(description: RTCSessionDescriptionInit | null) {
   return summary;
 }
 
-function formatCandidateSummary(description: RTCSessionDescriptionInit | null) {
-  const summary = summarizeCandidates(description);
+function formatCandidateSummary(
+  description: RTCSessionDescriptionInit | null,
+  candidates: RTCIceCandidateInit[] = [],
+) {
+  const summary = summarizeCandidates(description, candidates);
   if (summary.total === 0) return "未收集到候选地址";
   return `${summary.total} 个候选地址，host ${summary.host}，srflx ${summary.srflx}，relay ${summary.relay}`;
 }
 
-function assertHasCandidates(description: RTCSessionDescriptionInit | null, label: string) {
-  const summary = summarizeCandidates(description);
+function assertHasCandidates(
+  description: RTCSessionDescriptionInit | null,
+  candidates: RTCIceCandidateInit[],
+  label: string,
+) {
+  const summary = summarizeCandidates(description, candidates);
   if (summary.total === 0) {
     throw new Error(`${label} 没有包含 ICE candidate，请刷新页面后重新生成。`);
+  }
+}
+
+function collectIceCandidates(peer: RTCPeerConnection) {
+  const candidates: RTCIceCandidateInit[] = [];
+  const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+    if (event.candidate) {
+      candidates.push(event.candidate.toJSON());
+    }
+  };
+  peer.addEventListener("icecandidate", onCandidate);
+  return {
+    candidates,
+    stop: () => peer.removeEventListener("icecandidate", onCandidate),
+  };
+}
+
+async function addPayloadCandidates(peer: RTCPeerConnection, payload: SignalPayload) {
+  const candidates = payload.candidates ?? [];
+  if (candidates.length === 0) return;
+
+  const sdpCandidates = new Set(
+    (payload.description.sdp?.match(/^a=candidate:.*$/gm) ?? []).map((line) =>
+      line.replace(/^a=/, ""),
+    ),
+  );
+
+  for (const candidate of candidates) {
+    if (!candidate.candidate || sdpCandidates.has(candidate.candidate)) continue;
+    await peer.addIceCandidate(candidate);
   }
 }
 
@@ -620,26 +670,29 @@ export default function App() {
       closeSenderPeer();
 
       const peer = createPeerConnection(updateSenderPeerState, setSenderError);
+      const ice = collectIceCandidates(peer);
       senderPeerRef.current = peer;
       attachSenderChannel(peer.createDataChannel("file-transfer", { ordered: true }));
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       await waitForIceGathering(peer);
+      ice.stop();
 
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Offer。");
       }
-      assertHasCandidates(peer.localDescription, "Offer");
+      assertHasCandidates(peer.localDescription, ice.candidates, "Offer");
 
       const encoded = await encodeSignal({
         kind: "direct-webrtc-signal",
         role: "offer",
         description: peer.localDescription.toJSON(),
+        candidates: ice.candidates,
         createdAt: Date.now(),
       });
       setSenderOffer(encoded);
-      setSenderStatus(`完整 Offer 已生成，${formatCandidateSummary(peer.localDescription)}。复制给接收方。`);
+      setSenderStatus(`完整 Offer 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给接收方。`);
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "生成 Offer 失败。");
     }
@@ -663,27 +716,31 @@ export default function App() {
       }
 
       const peer = createPeerConnection(updateReceiverPeerState, setReceiverError);
+      const ice = collectIceCandidates(peer);
       receiverPeerRef.current = peer;
       peer.addEventListener("datachannel", (event) => attachReceiverChannel(event.channel));
 
       await peer.setRemoteDescription(payload.description);
+      await addPayloadCandidates(peer, payload);
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
       await waitForIceGathering(peer);
+      ice.stop();
 
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Answer。");
       }
-      assertHasCandidates(peer.localDescription, "Answer");
+      assertHasCandidates(peer.localDescription, ice.candidates, "Answer");
 
       const encoded = await encodeSignal({
         kind: "direct-webrtc-signal",
         role: "answer",
         description: peer.localDescription.toJSON(),
+        candidates: ice.candidates,
         createdAt: Date.now(),
       });
       setReceiverAnswer(encoded);
-      setReceiverStatus(`完整 Answer 已生成，${formatCandidateSummary(peer.localDescription)}。复制给发送方。`);
+      setReceiverStatus(`完整 Answer 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给发送方。`);
     } catch (error) {
       setReceiverError(error instanceof Error ? error.message : "生成 Answer 失败。");
     }
@@ -704,6 +761,7 @@ export default function App() {
 
       setSenderStatus("正在应用 Answer，等待 DataChannel 打开...");
       await peer.setRemoteDescription(payload.description);
+      await addPayloadCandidates(peer, payload);
       updateSenderPeerState(peer);
       const channel = senderChannelRef.current;
       if (!channel) {
