@@ -62,6 +62,9 @@ type DetailItem = {
   progress?: number;
 };
 
+type TransferMode = "send" | "receive" | null;
+type SenderHandshakeStage = "offer" | "answer";
+
 const navItems = ["Direct", "STUN", "TURN", "SFU", "R2"];
 const rtcConfig: RTCConfiguration = { iceServers: [] };
 const chunkSize = 64 * 1024;
@@ -472,6 +475,8 @@ export default function App() {
   const [receivedBytes, setReceivedBytes] = useState(0);
   const [incomingMeta, setIncomingMeta] = useState<TransferMeta | null>(null);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [transferMode, setTransferMode] = useState<TransferMode>(null);
+  const [senderHandshakeStage, setSenderHandshakeStage] = useState<SenderHandshakeStage>("offer");
 
   useEffect(() => {
     return () => {
@@ -588,6 +593,7 @@ export default function App() {
     setSenderProgress(0);
     setSentBytes(0);
     setIsSending(false);
+    setSenderHandshakeStage("offer");
   }
 
   function resetReceiver() {
@@ -692,6 +698,7 @@ export default function App() {
         createdAt: Date.now(),
       });
       setSenderOffer(encoded);
+      setSenderHandshakeStage("offer");
       setSenderStatus(`完整 Offer 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给接收方。`);
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "生成 Offer 失败。");
@@ -771,6 +778,25 @@ export default function App() {
       await sendSelectedFile();
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "应用 Answer 失败。");
+    }
+  }
+
+  async function copySenderOffer() {
+    try {
+      setSenderError("");
+      await copyText(senderOffer);
+      setSenderHandshakeStage("answer");
+    } catch (error) {
+      setSenderError(error instanceof Error ? error.message : "复制 Offer 失败。");
+    }
+  }
+
+  async function copyReceiverAnswer() {
+    try {
+      setReceiverError("");
+      await copyText(receiverAnswer);
+    } catch (error) {
+      setReceiverError(error instanceof Error ? error.message : "复制 Answer 失败。");
     }
   }
 
@@ -877,6 +903,45 @@ export default function App() {
     setReceiverProgress(size ? (received / size) * 100 : 0);
   }
 
+  const senderConnected = senderChannelState === "open" || senderPeerState === "connected";
+  const receiverConnected = receiverChannelState === "open" || receiverPeerState === "connected";
+  const activeConnected = transferMode === "send" ? senderConnected : transferMode === "receive" ? receiverConnected : false;
+
+  function RoleOption({
+    mode,
+    title,
+    description,
+    icon: Icon,
+  }: {
+    mode: Exclude<TransferMode, null>;
+    title: string;
+    description: string;
+    icon: typeof Monitor;
+  }) {
+    const selected = transferMode === mode;
+    return (
+      <button
+        className={`grid min-h-[68px] grid-cols-[22px_34px_minmax(0,1fr)] items-center gap-3 rounded-xl border px-3 text-left transition hover:-translate-y-px hover:border-[#1677ff] hover:bg-white ${
+          selected ? "border-[#9ec7ff] bg-[#f2f8ff] shadow-[0_8px_22px_rgba(47,125,246,0.10)]" : "border-[#d7e5f6] bg-white/80"
+        }`}
+        type="button"
+        onClick={() => {
+          setTransferMode(mode);
+          if (mode === "send") {
+            setSenderHandshakeStage(senderOffer ? "answer" : "offer");
+          }
+        }}
+      >
+        <span className={`size-4 rounded-full border ${selected ? "border-[#1677ff] bg-[#1677ff] ring-4 ring-[#1677ff]/15" : "border-[#9aabc4]"}`} />
+        <Icon aria-hidden="true" className={selected ? "text-[#1677ff]" : "text-[#6e82a0]"} size={23} />
+        <span className="min-w-0">
+          <strong className="block text-[15px] font-extrabold text-[#071b3a]">{title}</strong>
+          <span className="block truncate text-[13px] text-[#526c92]">{description}</span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <main className="mx-auto flex min-h-dvh w-[min(1680px,calc(100vw_-_clamp(28px,4vw,72px)))] flex-col py-[clamp(18px,2.5vw,34px)]">
       <header className="mb-[clamp(18px,2.2vw,28px)] grid grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(160px,260px)] items-center gap-4 max-[1040px]:grid-cols-1 max-[1040px]:justify-items-center">
@@ -912,7 +977,7 @@ export default function App() {
       </header>
 
       <div className="grid flex-1 grid-cols-[minmax(360px,1fr)_minmax(0,1.8fr)] gap-[clamp(14px,1.5vw,22px)] max-[1180px]:grid-cols-1">
-        <Panel className="p-[clamp(18px,1.8vw,28px)]">
+        <Panel className="row-span-2 p-[clamp(18px,1.8vw,28px)] max-[1180px]:row-span-1">
           <div className="mb-7 flex items-start justify-between gap-4">
             <div>
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
@@ -922,6 +987,7 @@ export default function App() {
               onClick={() => {
                 resetSender();
                 resetReceiver();
+                setTransferMode(null);
               }}
             >
               <RefreshCw aria-hidden="true" size={17} />
@@ -992,100 +1058,128 @@ export default function App() {
         <div className="grid grid-cols-2 gap-[clamp(14px,1.5vw,22px)] max-[980px]:grid-cols-1">
           <Panel className="p-[clamp(18px,1.8vw,28px)]">
             <div className="mb-5">
-              <h2 className="text-[22px] font-extrabold text-[#061b3a]">发送方</h2>
-              <p className="mt-1 text-[15px] text-[#526c92]">选择文件，复制 Offer；收到 Answer 后粘贴回来。</p>
+              <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
+              <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
             </div>
 
+            {!transferMode && (
+              <div className="grid gap-3">
+                <RoleOption mode="send" title="发送文件" description="生成 Offer，等待接收方 Answer" icon={UploadCloud} />
+                <RoleOption mode="receive" title="接收文件" description="粘贴 Offer，生成 Answer" icon={Download} />
+              </div>
+            )}
+
+            {transferMode && activeConnected && (
+              <div className="grid min-h-[260px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] px-5 py-7 text-center">
+                <span className="grid size-[68px] place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_14px_30px_rgba(47,125,246,0.24)]">
+                  <Check aria-hidden="true" size={34} />
+                </span>
+                <div>
+                  <h3 className="mt-5 text-[21px] font-extrabold text-[#061b3a]">已连接</h3>
+                  <p className="mt-2 text-[15px] text-[#526c92]">
+                    {transferMode === "send" ? "Answer 已应用，文件会通过 DataChannel 发送。" : "接收通道已打开，等待发送方传输文件。"}
+                  </p>
+                </div>
+                <div className="mt-5 w-full rounded-xl border border-[#d7e5f6] bg-white px-4 py-4 text-left">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-[17px] font-extrabold text-[#071b3a]">{transferMode === "send" ? "发送进度" : "接收进度"}</h3>
+                    <span className="text-[14px] font-medium text-[#526c92]">{formatPercent(transferMode === "send" ? senderProgress : receiverProgress)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-[#dce8f7]">
+                    <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${transferMode === "send" ? senderProgress : receiverProgress}%` }} />
+                  </div>
+                  <div className="mt-3 flex justify-between gap-3 text-[14px] text-[#526c92]">
+                    <span>{transferMode === "send" ? formatBytes(sentBytes) : formatBytes(receivedBytes)}</span>
+                    <span>{formatBytes(totalBytes)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {transferMode === "send" && !activeConnected && (
+              <div className="grid gap-4">
+                {senderHandshakeStage === "offer" ? (
+                  <>
+                    <TextArea label={`发送方 Offer ${senderOfferSize}`} value={senderOffer} onChange={setSenderOffer} placeholder="选择文件并生成 Offer 后，把这一整串文本复制给接收方" />
+                    <div className="flex flex-wrap gap-3">
+                      <PrimaryButton onClick={generateOffer} disabled={!senderCanGenerateOffer}>
+                        <Send aria-hidden="true" size={17} />
+                        生成 Offer
+                      </PrimaryButton>
+                      <SecondaryButton onClick={() => void copySenderOffer()} disabled={!senderOffer}>
+                        <Copy aria-hidden="true" size={17} />
+                        复制 Offer
+                      </SecondaryButton>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <TextArea label="接收方 Answer" value={senderAnswerInput} onChange={setSenderAnswerInput} placeholder="把接收方生成的 Answer 粘贴到这里" />
+                    <div className="flex flex-wrap gap-3">
+                      <SecondaryButton onClick={() => setSenderHandshakeStage("offer")}>
+                        <FileText aria-hidden="true" size={17} />
+                        查看 Offer
+                      </SecondaryButton>
+                      <PrimaryButton onClick={applyAnswerToSender} disabled={!senderCanApplyAnswer}>
+                        <Link2 aria-hidden="true" size={17} />
+                        发送
+                      </PrimaryButton>
+                    </div>
+                  </>
+                )}
+                <p className={`rounded-xl px-4 py-3 text-[14px] ${senderError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
+                  {senderError || senderStatus}
+                </p>
+              </div>
+            )}
+
+            {transferMode === "receive" && !activeConnected && (
+              <div className="grid gap-4">
+                <TextArea label="发送方 Offer" value={receiverOfferInput} onChange={setReceiverOfferInput} placeholder="把发送方 Offer 粘贴到这里" />
+                <div className="flex flex-wrap gap-3">
+                  <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
+                    <Link2 aria-hidden="true" size={17} />
+                    生成 Answer
+                  </PrimaryButton>
+                  <SecondaryButton onClick={() => void copyReceiverAnswer()} disabled={!receiverAnswer}>
+                    <Copy aria-hidden="true" size={17} />
+                    复制 Answer
+                  </SecondaryButton>
+                </div>
+                <TextArea label={`接收方 Answer ${receiverAnswerSize}`} value={receiverAnswer} onChange={setReceiverAnswer} placeholder="生成后复制这一整串文本给发送方" />
+                <p className={`rounded-xl px-4 py-3 text-[14px] ${receiverError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
+                  {receiverError || receiverStatus}
+                </p>
+              </div>
+            )}
+          </Panel>
+
+          <Panel className="p-[clamp(18px,1.8vw,28px)]">
             <div
-              className="grid min-h-[210px] place-items-center rounded-2xl border-2 border-dashed border-[#bdd3f1] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(244,249,255,0.78))] px-5 py-7 text-center"
+              className="grid min-h-[300px] place-items-center rounded-2xl border-2 border-dashed border-[#bdd3f1] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(244,249,255,0.78))] px-5 py-7 text-center"
               onDrop={handleDrop}
               onDragOver={(event) => event.preventDefault()}
               aria-label="选择发送文件"
             >
               <input ref={senderFileInputRef} className="hidden" type="file" onChange={handleFileInput} />
-              <div className="mb-5 grid size-[74px] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)]">
-                <UploadCloud aria-hidden="true" size={44} />
+              <div className="mb-5 grid size-[82px] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)]">
+                <UploadCloud aria-hidden="true" size={46} />
               </div>
               <strong className="max-w-full break-words text-[20px] font-extrabold text-[#071b3a]">
-                {selectedFile ? selectedFile.name : "点击或拖拽文件到此处"}
+                {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
-              <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "DataChannel 分块发送"}</span>
-              <div className="mt-5 flex flex-wrap justify-center gap-3">
-                <SecondaryButton onClick={() => senderFileInputRef.current?.click()}>
+              <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "选择发送文件后再生成 Offer"}</span>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <PrimaryButton onClick={() => senderFileInputRef.current?.click()}>
                   <HardDrive aria-hidden="true" size={17} />
                   选择文件
-                </SecondaryButton>
-                <PrimaryButton onClick={generateOffer} disabled={!senderCanGenerateOffer}>
-                  <Send aria-hidden="true" size={17} />
-                  生成 Offer
                 </PrimaryButton>
               </div>
             </div>
-
-            <div className="mt-5 grid gap-4">
-              <TextArea label={`发送方 Offer ${senderOfferSize}`} value={senderOffer} onChange={setSenderOffer} placeholder="生成后复制这一整串文本给接收方" />
-              <div className="flex flex-wrap gap-3">
-                <SecondaryButton onClick={() => void copyText(senderOffer)} disabled={!senderOffer}>
-                  <Copy aria-hidden="true" size={17} />
-                  复制 Offer
-                </SecondaryButton>
-              </div>
-
-              <TextArea label="接收方 Answer" value={senderAnswerInput} onChange={setSenderAnswerInput} placeholder="把接收方生成的 Answer 粘贴到这里" />
-              <PrimaryButton onClick={applyAnswerToSender} disabled={!senderCanApplyAnswer}>
-                <Link2 aria-hidden="true" size={17} />
-                应用 Answer 并发送
-              </PrimaryButton>
-            </div>
-
-            <p className={`mt-4 rounded-xl px-4 py-3 text-[14px] ${senderError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
-              {senderError || senderStatus}
-            </p>
-          </Panel>
-
-          <Panel className="p-[clamp(18px,1.8vw,28px)]">
-            <div className="mb-5">
-              <h2 className="text-[22px] font-extrabold text-[#061b3a]">接收方</h2>
-              <p className="mt-1 text-[15px] text-[#526c92]">粘贴 Offer，复制 Answer；连接打开后自动下载收到的文件。</p>
-            </div>
-
-            <div className="grid gap-4">
-              <TextArea label="发送方 Offer" value={receiverOfferInput} onChange={setReceiverOfferInput} placeholder="把发送方 Offer 粘贴到这里" />
-              <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
-                <Link2 aria-hidden="true" size={17} />
-                生成 Answer
-              </PrimaryButton>
-
-              <TextArea label={`接收方 Answer ${receiverAnswerSize}`} value={receiverAnswer} onChange={setReceiverAnswer} placeholder="生成后复制这一整串文本给发送方" />
-              <div className="flex flex-wrap gap-3">
-                <SecondaryButton onClick={() => void copyText(receiverAnswer)} disabled={!receiverAnswer}>
-                  <Copy aria-hidden="true" size={17} />
-                  复制 Answer
-                </SecondaryButton>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-[#d7e5f6] bg-white px-4 py-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-[17px] font-extrabold text-[#071b3a]">接收文件</h3>
-                <span className="text-[14px] font-medium text-[#526c92]">{incomingMeta ? incomingMeta.name : "空闲"}</span>
-              </div>
-              <div className="h-2 rounded-full bg-[#dce8f7]">
-                <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${receiverProgress}%` }} />
-              </div>
-              <div className="mt-3 flex justify-between gap-3 text-[14px] text-[#526c92]">
-                <span>{formatBytes(receivedBytes)}</span>
-                <span>{incomingMeta ? formatBytes(incomingMeta.size) : "0 B"}</span>
-              </div>
-            </div>
-
-            <p className={`mt-4 rounded-xl px-4 py-3 text-[14px] ${receiverError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
-              {receiverError || receiverStatus}
-            </p>
           </Panel>
         </div>
 
-        <Panel className="col-span-2 p-[clamp(18px,1.8vw,28px)] max-[1180px]:col-span-1">
+        <Panel className="p-[clamp(18px,1.8vw,28px)]">
           <div className="mb-6 flex items-center justify-between gap-4 max-[560px]:items-start max-[560px]:flex-col">
             <h2 className="m-0 text-[26px] font-extrabold text-[#061b3a]">已接收文件</h2>
             <span className="rounded-lg border border-[#d7e5f6] bg-white px-4 py-2 text-[15px] font-medium text-[#526c92]">
