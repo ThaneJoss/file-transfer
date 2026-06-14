@@ -761,7 +761,14 @@ export default function App() {
 
   async function handleReceiverMessage(data: unknown) {
     if (typeof data === "string") {
-      const message = JSON.parse(data) as TransferMeta | TransferDone;
+      let message: TransferMeta | TransferDone;
+      try {
+        message = JSON.parse(data) as TransferMeta | TransferDone;
+      } catch {
+        setReceiverError("收到无法识别的控制消息。");
+        return;
+      }
+
       if (message.kind === "meta") {
         receiveMetaRef.current = message;
         receiveChunksRef.current = [];
@@ -775,7 +782,10 @@ export default function App() {
 
       if (message.kind === "done") {
         const meta = receiveMetaRef.current;
-        if (!meta) throw new Error("缺少文件元数据。");
+        if (!meta) {
+          setReceiverError("收到完成信号，但缺少文件元数据。请重新传输。");
+          return;
+        }
 
         const blob = new Blob(receiveChunksRef.current, {
           type: meta.type || "application/octet-stream",
