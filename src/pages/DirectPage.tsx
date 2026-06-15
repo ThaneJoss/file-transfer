@@ -1117,18 +1117,31 @@ export default function DirectPage() {
 
             {transferMode === "receive" && !activeConnected && (
               <div className="grid gap-4">
-                <TextArea label="发送方 Offer" value={receiverOfferInput} onChange={setReceiverOfferInput} placeholder="把发送方 Offer 粘贴到这里" />
-                <div className="flex flex-wrap gap-3">
-                  <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
-                    <Link2 aria-hidden="true" size={17} />
-                    生成 Answer
-                  </PrimaryButton>
-                  <SecondaryButton onClick={() => void copyReceiverAnswer()} disabled={!receiverAnswer}>
-                    <Copy aria-hidden="true" size={17} />
-                    复制 Answer
-                  </SecondaryButton>
-                </div>
-                <TextArea label={`接收方 Answer ${receiverAnswerSize}`} value={receiverAnswer} onChange={setReceiverAnswer} placeholder="生成后复制这一整串文本给发送方" />
+                {receiverAnswer ? (
+                  <>
+                    <TextArea label={`接收方 Answer ${receiverAnswerSize}`} value={receiverAnswer} onChange={setReceiverAnswer} placeholder="生成后复制这一整串文本给发送方" />
+                    <div className="flex flex-wrap gap-3">
+                      <SecondaryButton onClick={() => setReceiverAnswer("")}>
+                        <FileText aria-hidden="true" size={17} />
+                        修改 Offer
+                      </SecondaryButton>
+                      <PrimaryButton onClick={() => void copyReceiverAnswer()} disabled={!receiverAnswer}>
+                        <Copy aria-hidden="true" size={17} />
+                        复制 Answer
+                      </PrimaryButton>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <TextArea label="发送方 Offer" value={receiverOfferInput} onChange={setReceiverOfferInput} placeholder="把发送方 Offer 粘贴到这里" />
+                    <div className="flex flex-wrap gap-3">
+                      <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
+                        <Link2 aria-hidden="true" size={17} />
+                        生成 Answer
+                      </PrimaryButton>
+                    </div>
+                  </>
+                )}
                 <p className={`rounded-xl px-4 py-3 text-[14px] ${receiverError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
                   {receiverError || receiverStatus}
                 </p>
