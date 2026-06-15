@@ -4,6 +4,7 @@ import { AppShell, routes } from "./components/AppShell";
 import type { AppRoute, AppRouteId } from "./components/AppShell";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import DirectPage from "./pages/DirectPage";
+import StunPage from "./pages/StunPage";
 
 function routeFromPath(pathname: string): AppRoute {
   if (pathname === "/") return routes[0];
@@ -29,7 +30,7 @@ export default function App() {
   const page = useMemo(() => {
     switch (activeRoute) {
       case "stun":
-        return <ComingSoonPage title="STUN" />;
+        return <StunPage />;
       case "turn":
         return <ComingSoonPage title="TURN" />;
       case "sfu":

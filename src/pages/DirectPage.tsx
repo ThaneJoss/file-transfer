@@ -11,6 +11,7 @@ import {
   Monitor,
   RefreshCw,
   Send,
+  Server,
   UploadCloud,
   Wifi,
 } from "lucide-react";
@@ -20,12 +21,14 @@ import type { ChangeEvent, DragEvent } from "react";
 import { Panel } from "../components/Panel";
 
 type SignalPayload = {
-  kind: "direct-webrtc-signal";
+  kind: SignalKind;
   role: "offer" | "answer";
   description: RTCSessionDescriptionInit;
   candidates?: RTCIceCandidateInit[];
   createdAt: number;
 };
+
+type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal";
 
 type TransferMeta = {
   kind: "meta";
@@ -65,8 +68,61 @@ type DetailItem = {
 
 type TransferMode = "send" | "receive" | null;
 type SenderHandshakeStage = "offer" | "answer";
+type TransferVariant = "direct" | "stun";
 
-const rtcConfig: RTCConfiguration = { iceServers: [] };
+type CandidateSummary = {
+  host: number;
+  srflx: number;
+  relay: number;
+  total: number;
+};
+
+type TransferVariantConfig = {
+  connectionType: string;
+  description: string;
+  signalKind: SignalKind;
+  rtcConfig: RTCConfiguration;
+  initialSenderStatus: string;
+  initialReceiverStatus: string;
+  offerGatheringStatus: string;
+  answerGatheringStatus: string;
+  offerCandidateLabel: string;
+  answerCandidateLabel: string;
+  serverLabel?: string;
+  requireSrflx: boolean;
+};
+
+const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
+  direct: {
+    connectionType: "Direct DataChannel",
+    description: "手动复制 Offer / Answer，文件走 DataChannel 点对点传输。",
+    signalKind: "direct-webrtc-signal",
+    rtcConfig: { iceServers: [] },
+    initialSenderStatus: "选择文件后生成 Offer。",
+    initialReceiverStatus: "等待发送方 Offer。",
+    offerGatheringStatus: "正在创建 WebRTC Offer，并收集本地 host 候选地址...",
+    answerGatheringStatus: "正在读取 Offer，并收集接收方 host 候选地址...",
+    offerCandidateLabel: "Offer",
+    answerCandidateLabel: "Answer",
+    requireSrflx: false,
+  },
+  stun: {
+    connectionType: "STUN DataChannel",
+    description: "通过 Cloudflare STUN 发现公网映射，再用 DataChannel 点对点传输文件。",
+    signalKind: "stun-webrtc-signal",
+    rtcConfig: { iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }] },
+    initialSenderStatus: "选择文件后通过 Cloudflare STUN 生成 Offer。",
+    initialReceiverStatus: "等待发送方 STUN Offer。",
+    offerGatheringStatus: "正在创建 WebRTC Offer，并通过 Cloudflare STUN 收集候选地址...",
+    answerGatheringStatus: "正在读取 STUN Offer，并通过 Cloudflare STUN 收集接收方候选地址...",
+    offerCandidateLabel: "STUN Offer",
+    answerCandidateLabel: "STUN Answer",
+    serverLabel: "stun.cloudflare.com:3478",
+    requireSrflx: true,
+  },
+};
+
+const emptyCandidateSummary: CandidateSummary = { host: 0, srflx: 0, relay: 0, total: 0 };
 const chunkSize = 64 * 1024;
 const highWaterMark = 8 * 1024 * 1024;
 const lowWaterMark = 2 * 1024 * 1024;
@@ -141,7 +197,11 @@ async function decodeSignal(value: string): Promise<SignalPayload> {
 
 function parseSignal(json: string): SignalPayload {
   const payload = JSON.parse(json) as SignalPayload;
-  if (payload.kind !== "direct-webrtc-signal" || !payload.description?.type || !payload.description.sdp) {
+  if (
+    (payload.kind !== "direct-webrtc-signal" && payload.kind !== "stun-webrtc-signal") ||
+    !payload.description?.type ||
+    !payload.description.sdp
+  ) {
     throw new Error("连接文本格式不正确。");
   }
   return payload;
@@ -150,7 +210,7 @@ function parseSignal(json: string): SignalPayload {
 function summarizeCandidates(
   description: RTCSessionDescriptionInit | null,
   candidates: RTCIceCandidateInit[] = [],
-) {
+): CandidateSummary {
   const sdp = description?.sdp ?? "";
   const summary = { host: 0, srflx: 0, relay: 0, total: 0 };
   const candidateLines = [
@@ -181,14 +241,42 @@ function formatCandidateSummary(
   return `${summary.total} 个候选地址，host ${summary.host}，srflx ${summary.srflx}，relay ${summary.relay}`;
 }
 
+function mergeCandidateSummaries(...summaries: CandidateSummary[]) {
+  return summaries.reduce<CandidateSummary>(
+    (merged, summary) => ({
+      host: merged.host + summary.host,
+      srflx: merged.srflx + summary.srflx,
+      relay: merged.relay + summary.relay,
+      total: merged.total + summary.total,
+    }),
+    { ...emptyCandidateSummary },
+  );
+}
+
+function formatStoredCandidateSummary(summary: CandidateSummary) {
+  if (summary.total === 0) return "未收集";
+  return `${summary.total} 个，host ${summary.host}，srflx ${summary.srflx}，relay ${summary.relay}`;
+}
+
+function formatStunStatus(summary: CandidateSummary, gatheringStates: string[]) {
+  if (summary.srflx > 0) return `已发现公网映射，srflx ${summary.srflx}`;
+  if (gatheringStates.some((state) => state === "gathering")) return "正在通过 STUN 收集";
+  if (summary.total > 0) return "仅有本地候选，未发现 srflx";
+  return "等待 STUN 收集";
+}
+
 function assertHasCandidates(
   description: RTCSessionDescriptionInit | null,
   candidates: RTCIceCandidateInit[],
   label: string,
+  requireSrflx: boolean,
 ) {
   const summary = summarizeCandidates(description, candidates);
   if (summary.total === 0) {
     throw new Error(`${label} 没有包含 ICE candidate，请刷新页面后重新生成。`);
+  }
+  if (requireSrflx && summary.srflx === 0) {
+    throw new Error(`${label} 没有收集到 STUN srflx 候选地址，请确认网络可以访问 Cloudflare STUN 后重新生成。`);
   }
 }
 
@@ -223,10 +311,11 @@ async function addPayloadCandidates(peer: RTCPeerConnection, payload: SignalPayl
 }
 
 function createPeerConnection(
+  config: RTCConfiguration,
   onState: (peer: RTCPeerConnection) => void,
   onError: (message: string) => void,
 ) {
-  const peer = new RTCPeerConnection(rtcConfig);
+  const peer = new RTCPeerConnection(config);
   const notify = () => onState(peer);
   peer.addEventListener("connectionstatechange", notify);
   peer.addEventListener("iceconnectionstatechange", notify);
@@ -446,7 +535,8 @@ function StatusMessage({
   );
 }
 
-export default function DirectPage() {
+export default function DirectPage({ variant = "direct" }: { variant?: TransferVariant }) {
+  const config = transferVariantConfig[variant];
   const senderPeerRef = useRef<RTCPeerConnection | null>(null);
   const receiverPeerRef = useRef<RTCPeerConnection | null>(null);
   const senderChannelRef = useRef<RTCDataChannel | null>(null);
@@ -461,10 +551,12 @@ export default function DirectPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [senderOffer, setSenderOffer] = useState("");
   const [senderAnswerInput, setSenderAnswerInput] = useState("");
-  const [senderStatus, setSenderStatus] = useState("选择文件后生成 Offer。");
+  const [senderStatus, setSenderStatus] = useState(config.initialSenderStatus);
   const [senderError, setSenderError] = useState("");
   const [senderPeerState, setSenderPeerState] = useState("new");
   const [senderIceState, setSenderIceState] = useState("new");
+  const [senderIceGatheringState, setSenderIceGatheringState] = useState("new");
+  const [senderCandidateSummary, setSenderCandidateSummary] = useState<CandidateSummary>(emptyCandidateSummary);
   const [senderChannelState, setSenderChannelState] = useState("closed");
   const [senderProgress, setSenderProgress] = useState(0);
   const [sentBytes, setSentBytes] = useState(0);
@@ -472,10 +564,12 @@ export default function DirectPage() {
 
   const [receiverOfferInput, setReceiverOfferInput] = useState("");
   const [receiverAnswer, setReceiverAnswer] = useState("");
-  const [receiverStatus, setReceiverStatus] = useState("等待发送方 Offer。");
+  const [receiverStatus, setReceiverStatus] = useState(config.initialReceiverStatus);
   const [receiverError, setReceiverError] = useState("");
   const [receiverPeerState, setReceiverPeerState] = useState("new");
   const [receiverIceState, setReceiverIceState] = useState("new");
+  const [receiverIceGatheringState, setReceiverIceGatheringState] = useState("new");
+  const [receiverCandidateSummary, setReceiverCandidateSummary] = useState<CandidateSummary>(emptyCandidateSummary);
   const [receiverChannelState, setReceiverChannelState] = useState("closed");
   const [receiverProgress, setReceiverProgress] = useState(0);
   const [receivedBytes, setReceivedBytes] = useState(0);
@@ -498,36 +592,80 @@ export default function DirectPage() {
 
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
+  const combinedCandidateSummary = mergeCandidateSummaries(senderCandidateSummary, receiverCandidateSummary);
+  const stunStatus = formatStunStatus(combinedCandidateSummary, [
+    senderIceGatheringState,
+    receiverIceGatheringState,
+  ]);
 
-  const transferSteps: TransferStep[] = [
-    {
-      label: "Offer",
-      meta: senderOffer || receiverOfferInput ? "已生成" : "等待生成",
-      icon: FileText,
-      active: Boolean(senderOffer || receiverOfferInput),
-    },
-    {
-      label: "Answer",
-      meta: senderAnswerInput || receiverAnswer ? "已交换" : "等待交换",
-      icon: Link2,
-      active: Boolean(senderAnswerInput || receiverAnswer),
-    },
-    {
-      label: "DataChannel",
-      meta: senderChannelState === "open" || receiverChannelState === "open" ? "已打开" : "未打开",
-      icon: Wifi,
-      active: senderChannelState === "open" || receiverChannelState === "open",
-    },
-    {
-      label: "文件",
-      meta: progress >= 100 ? "已完成" : progress > 0 ? "传输中" : "等待传输",
-      icon: Check,
-      active: progress >= 100,
-    },
-  ];
+  const transferSteps: TransferStep[] =
+    variant === "stun"
+      ? [
+          {
+            label: "STUN",
+            meta: combinedCandidateSummary.srflx > 0 ? "已发现 srflx" : "等待发现",
+            icon: Server,
+            active: combinedCandidateSummary.srflx > 0,
+          },
+          {
+            label: "信令",
+            meta: senderAnswerInput || receiverAnswer ? "已交换" : senderOffer || receiverOfferInput ? "交换中" : "等待生成",
+            icon: Link2,
+            active: Boolean(senderOffer || receiverOfferInput),
+          },
+          {
+            label: "通道",
+            meta: senderChannelState === "open" || receiverChannelState === "open" ? "已打开" : "未打开",
+            icon: Wifi,
+            active: senderChannelState === "open" || receiverChannelState === "open",
+          },
+          {
+            label: "文件",
+            meta: progress >= 100 ? "已完成" : progress > 0 ? "传输中" : "等待传输",
+            icon: Check,
+            active: progress >= 100,
+          },
+        ]
+      : [
+          {
+            label: "Offer",
+            meta: senderOffer || receiverOfferInput ? "已生成" : "等待生成",
+            icon: FileText,
+            active: Boolean(senderOffer || receiverOfferInput),
+          },
+          {
+            label: "Answer",
+            meta: senderAnswerInput || receiverAnswer ? "已交换" : "等待交换",
+            icon: Link2,
+            active: Boolean(senderAnswerInput || receiverAnswer),
+          },
+          {
+            label: "DataChannel",
+            meta: senderChannelState === "open" || receiverChannelState === "open" ? "已打开" : "未打开",
+            icon: Wifi,
+            active: senderChannelState === "open" || receiverChannelState === "open",
+          },
+          {
+            label: "文件",
+            meta: progress >= 100 ? "已完成" : progress > 0 ? "传输中" : "等待传输",
+            icon: Check,
+            active: progress >= 100,
+          },
+        ];
 
   const details: DetailItem[] = [
-    { label: "连接类型", value: "Direct DataChannel", icon: Link2 },
+    { label: "连接类型", value: config.connectionType, icon: Link2 },
+    ...(variant === "stun"
+      ? [
+          {
+            label: "STUN状态",
+            value: stunStatus,
+            icon: Server,
+            status: combinedCandidateSummary.srflx > 0 ? ("online" as const) : undefined,
+          },
+          { label: "STUN服务器", value: config.serverLabel ?? "未配置", icon: Server },
+        ]
+      : []),
     {
       label: "发送端状态",
       value: `${senderPeerState} / ${senderIceState}`,
@@ -542,6 +680,12 @@ export default function DirectPage() {
     },
     { label: "发送通道", value: senderChannelState, icon: Wifi },
     { label: "接收通道", value: receiverChannelState, icon: Wifi },
+    ...(variant === "stun"
+      ? [
+          { label: "发送端候选", value: formatStoredCandidateSummary(senderCandidateSummary), icon: FileText },
+          { label: "接收端候选", value: formatStoredCandidateSummary(receiverCandidateSummary), icon: FileText },
+        ]
+      : []),
     { label: "选中文件", value: selectedFile ? selectedFile.name : "未选择", icon: HardDrive },
     { label: "文件大小", value: totalBytes ? formatBytes(totalBytes) : "0 B", icon: Database },
     { label: "已发送", value: formatBytes(sentBytes), icon: UploadCloud },
@@ -559,11 +703,13 @@ export default function DirectPage() {
   function updateSenderPeerState(peer: RTCPeerConnection) {
     setSenderPeerState(peer.connectionState);
     setSenderIceState(peer.iceConnectionState);
+    setSenderIceGatheringState(peer.iceGatheringState);
   }
 
   function updateReceiverPeerState(peer: RTCPeerConnection) {
     setReceiverPeerState(peer.connectionState);
     setReceiverIceState(peer.iceConnectionState);
+    setReceiverIceGatheringState(peer.iceGatheringState);
   }
 
   function closeSenderPeer() {
@@ -573,6 +719,7 @@ export default function DirectPage() {
     senderPeerRef.current = null;
     setSenderPeerState("new");
     setSenderIceState("new");
+    setSenderIceGatheringState("new");
     setSenderChannelState("closed");
   }
 
@@ -587,6 +734,7 @@ export default function DirectPage() {
     setIncomingMeta(null);
     setReceiverPeerState("new");
     setReceiverIceState("new");
+    setReceiverIceGatheringState("new");
     setReceiverChannelState("closed");
   }
 
@@ -594,8 +742,9 @@ export default function DirectPage() {
     closeSenderPeer();
     setSenderOffer("");
     setSenderAnswerInput("");
-    setSenderStatus("选择文件后生成 Offer。");
+    setSenderStatus(config.initialSenderStatus);
     setSenderError("");
+    setSenderCandidateSummary(emptyCandidateSummary);
     setSenderProgress(0);
     setSentBytes(0);
     setIsSending(false);
@@ -607,8 +756,9 @@ export default function DirectPage() {
     closeReceiverPeer();
     setReceiverOfferInput("");
     setReceiverAnswer("");
-    setReceiverStatus("等待发送方 Offer。");
+    setReceiverStatus(config.initialReceiverStatus);
     setReceiverError("");
+    setReceiverCandidateSummary(emptyCandidateSummary);
     setReceiverProgress(0);
     setReceivedBytes(0);
   }
@@ -618,7 +768,7 @@ export default function DirectPage() {
     setSenderProgress(0);
     setSentBytes(0);
     if (file) {
-      setSenderStatus(`已选择 ${file.name}，可以生成 Offer。`);
+      setSenderStatus(`已选择 ${file.name}，可以生成 ${variant === "stun" ? "STUN " : ""}Offer。`);
     }
   }
 
@@ -674,14 +824,15 @@ export default function DirectPage() {
 
     try {
       setSenderError("");
-      setSenderStatus("正在创建 WebRTC Offer，并收集本地 host 候选地址...");
+      setSenderStatus(config.offerGatheringStatus);
       setSenderOffer("");
       setSenderAnswerInput("");
+      setSenderCandidateSummary(emptyCandidateSummary);
       setSenderProgress(0);
       setSentBytes(0);
       closeSenderPeer();
 
-      const peer = createPeerConnection(updateSenderPeerState, setSenderError);
+      const peer = createPeerConnection(config.rtcConfig, updateSenderPeerState, setSenderError);
       const ice = collectIceCandidates(peer);
       senderPeerRef.current = peer;
       attachSenderChannel(peer.createDataChannel("file-transfer", { ordered: true }));
@@ -694,10 +845,11 @@ export default function DirectPage() {
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Offer。");
       }
-      assertHasCandidates(peer.localDescription, ice.candidates, "Offer");
+      assertHasCandidates(peer.localDescription, ice.candidates, config.offerCandidateLabel, config.requireSrflx);
+      setSenderCandidateSummary(summarizeCandidates(peer.localDescription, ice.candidates));
 
       const encoded = await encodeSignal({
-        kind: "direct-webrtc-signal",
+        kind: config.signalKind,
         role: "offer",
         description: peer.localDescription.toJSON(),
         candidates: ice.candidates,
@@ -705,7 +857,7 @@ export default function DirectPage() {
       });
       setSenderOffer(encoded);
       setSenderHandshakeStage("offer");
-      setSenderStatus(`完整 Offer 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给接收方。`);
+      setSenderStatus(`完整 ${config.offerCandidateLabel} 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给接收方。`);
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "生成 Offer 失败。");
     }
@@ -714,8 +866,9 @@ export default function DirectPage() {
   async function createAnswerFromOffer() {
     try {
       setReceiverError("");
-      setReceiverStatus("正在读取 Offer，并收集接收方 host 候选地址...");
+      setReceiverStatus(config.answerGatheringStatus);
       setReceiverAnswer("");
+      setReceiverCandidateSummary(emptyCandidateSummary);
       setReceiverProgress(0);
       setReceivedBytes(0);
       receiveChunksRef.current = [];
@@ -727,8 +880,12 @@ export default function DirectPage() {
       if (payload.role !== "offer" || payload.description.type !== "offer") {
         throw new Error("粘贴的不是 Offer。");
       }
+      if (payload.kind !== config.signalKind) {
+        throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Offer。请确认双方打开的是同一个页面。`);
+      }
+      setSenderCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
-      const peer = createPeerConnection(updateReceiverPeerState, setReceiverError);
+      const peer = createPeerConnection(config.rtcConfig, updateReceiverPeerState, setReceiverError);
       const ice = collectIceCandidates(peer);
       receiverPeerRef.current = peer;
       peer.addEventListener("datachannel", (event) => attachReceiverChannel(event.channel));
@@ -743,17 +900,18 @@ export default function DirectPage() {
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Answer。");
       }
-      assertHasCandidates(peer.localDescription, ice.candidates, "Answer");
+      assertHasCandidates(peer.localDescription, ice.candidates, config.answerCandidateLabel, config.requireSrflx);
+      setReceiverCandidateSummary(summarizeCandidates(peer.localDescription, ice.candidates));
 
       const encoded = await encodeSignal({
-        kind: "direct-webrtc-signal",
+        kind: config.signalKind,
         role: "answer",
         description: peer.localDescription.toJSON(),
         candidates: ice.candidates,
         createdAt: Date.now(),
       });
       setReceiverAnswer(encoded);
-      setReceiverStatus(`完整 Answer 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给发送方。`);
+      setReceiverStatus(`完整 ${config.answerCandidateLabel} 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给发送方。`);
     } catch (error) {
       setReceiverError(error instanceof Error ? error.message : "生成 Answer 失败。");
     }
@@ -771,6 +929,10 @@ export default function DirectPage() {
       if (payload.role !== "answer" || payload.description.type !== "answer") {
         throw new Error("粘贴的不是 Answer。");
       }
+      if (payload.kind !== config.signalKind) {
+        throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Answer。请确认双方打开的是同一个页面。`);
+      }
+      setReceiverCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
       setSenderStatus("正在应用 Answer，等待 DataChannel 打开...");
       await peer.setRemoteDescription(payload.description);
@@ -974,7 +1136,7 @@ export default function DirectPage() {
           <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
             <div>
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
-              <p className="mt-1 text-[15px] text-[#526c92]">手动复制 Offer / Answer，文件走 DataChannel 点对点传输。</p>
+              <p className="mt-1 text-[15px] text-[#526c92]">{config.description}</p>
             </div>
             <SecondaryButton
               onClick={() => {
@@ -1067,8 +1229,18 @@ export default function DirectPage() {
 
             {!transferMode && (
               <div className="grid gap-3">
-                <RoleOption mode="send" title="发送文件" description="生成 Offer，等待接收方 Answer" icon={UploadCloud} />
-                <RoleOption mode="receive" title="接收文件" description="粘贴 Offer，生成 Answer" icon={Download} />
+                <RoleOption
+                  mode="send"
+                  title="发送文件"
+                  description={`生成 ${variant === "stun" ? "STUN " : ""}Offer，等待接收方 Answer`}
+                  icon={UploadCloud}
+                />
+                <RoleOption
+                  mode="receive"
+                  title="接收文件"
+                  description={`粘贴 ${variant === "stun" ? "STUN " : ""}Offer，生成 Answer`}
+                  icon={Download}
+                />
               </div>
             )}
 
@@ -1080,7 +1252,9 @@ export default function DirectPage() {
                 <div>
                   <h3 className="mt-3 text-[20px] font-extrabold text-[#061b3a]">已连接</h3>
                   <p className="mt-1 text-[14px] text-[#526c92]">
-                    {transferMode === "send" ? "Answer 已应用，文件会通过 DataChannel 发送。" : "接收通道已打开，等待发送方传输文件。"}
+                    {transferMode === "send"
+                      ? `${variant === "stun" ? "STUN " : ""}Answer 已应用，文件会通过 DataChannel 发送。`
+                      : "接收通道已打开，等待发送方传输文件。"}
                   </p>
                 </div>
                 <div className="mt-4 w-full rounded-xl border border-[#d7e5f6] bg-white px-4 py-3 text-left">
@@ -1103,25 +1277,35 @@ export default function DirectPage() {
               <div className="grid gap-4">
                 {senderHandshakeStage === "offer" ? (
                   <>
-                    <TextArea label={`发送方 Offer ${senderOfferSize}`} value={senderOffer} onChange={setSenderOffer} placeholder="选择文件并生成 Offer 后，把这一整串文本复制给接收方" />
+                    <TextArea
+                      label={`发送方 ${variant === "stun" ? "STUN " : ""}Offer ${senderOfferSize}`}
+                      value={senderOffer}
+                      onChange={setSenderOffer}
+                      placeholder={`选择文件并生成 ${variant === "stun" ? "STUN " : ""}Offer 后，把这一整串文本复制给接收方`}
+                    />
                     <div className="flex flex-wrap gap-3">
                       <PrimaryButton onClick={generateOffer} disabled={!senderCanGenerateOffer}>
                         <Send aria-hidden="true" size={17} />
-                        生成 Offer
+                        生成 {variant === "stun" ? "STUN " : ""}Offer
                       </PrimaryButton>
                       <SecondaryButton onClick={() => void copySenderOffer()} disabled={!senderOffer}>
                         <Copy aria-hidden="true" size={17} />
-                        复制 Offer
+                        复制 {variant === "stun" ? "STUN " : ""}Offer
                       </SecondaryButton>
                     </div>
                   </>
                 ) : (
                   <>
-                    <TextArea label="接收方 Answer" value={senderAnswerInput} onChange={setSenderAnswerInput} placeholder="把接收方生成的 Answer 粘贴到这里" />
+                    <TextArea
+                      label={`接收方 ${variant === "stun" ? "STUN " : ""}Answer`}
+                      value={senderAnswerInput}
+                      onChange={setSenderAnswerInput}
+                      placeholder={`把接收方生成的 ${variant === "stun" ? "STUN " : ""}Answer 粘贴到这里`}
+                    />
                     <div className="flex flex-wrap gap-3">
                       <SecondaryButton onClick={() => setSenderHandshakeStage("offer")}>
                         <FileText aria-hidden="true" size={17} />
-                        查看 Offer
+                        查看 {variant === "stun" ? "STUN " : ""}Offer
                       </SecondaryButton>
                       <PrimaryButton onClick={applyAnswerToSender} disabled={!senderCanApplyAnswer}>
                         <Link2 aria-hidden="true" size={17} />
@@ -1138,25 +1322,35 @@ export default function DirectPage() {
               <div className="grid gap-4">
                 {receiverAnswer ? (
                   <>
-                    <TextArea label={`接收方 Answer ${receiverAnswerSize}`} value={receiverAnswer} onChange={setReceiverAnswer} placeholder="生成后复制这一整串文本给发送方" />
+                    <TextArea
+                      label={`接收方 ${variant === "stun" ? "STUN " : ""}Answer ${receiverAnswerSize}`}
+                      value={receiverAnswer}
+                      onChange={setReceiverAnswer}
+                      placeholder="生成后复制这一整串文本给发送方"
+                    />
                     <div className="flex flex-wrap gap-3">
                       <SecondaryButton onClick={() => setReceiverAnswer("")}>
                         <FileText aria-hidden="true" size={17} />
-                        修改 Offer
+                        修改 {variant === "stun" ? "STUN " : ""}Offer
                       </SecondaryButton>
                       <PrimaryButton onClick={() => void copyReceiverAnswer()} disabled={!receiverAnswer}>
                         <Copy aria-hidden="true" size={17} />
-                        复制 Answer
+                        复制 {variant === "stun" ? "STUN " : ""}Answer
                       </PrimaryButton>
                     </div>
                   </>
                 ) : (
                   <>
-                    <TextArea label="发送方 Offer" value={receiverOfferInput} onChange={setReceiverOfferInput} placeholder="把发送方 Offer 粘贴到这里" />
+                    <TextArea
+                      label={`发送方 ${variant === "stun" ? "STUN " : ""}Offer`}
+                      value={receiverOfferInput}
+                      onChange={setReceiverOfferInput}
+                      placeholder={`把发送方 ${variant === "stun" ? "STUN " : ""}Offer 粘贴到这里`}
+                    />
                     <div className="flex flex-wrap gap-3">
                       <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
                         <Link2 aria-hidden="true" size={17} />
-                        生成 Answer
+                        生成 {variant === "stun" ? "STUN " : ""}Answer
                       </PrimaryButton>
                     </div>
                   </>
@@ -1183,7 +1377,9 @@ export default function DirectPage() {
               >
                 {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
-              <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "选择发送文件后再生成 Offer"}</span>
+              <span className="mt-1 text-[14px] text-[#526c92]">
+                {selectedFile ? formatBytes(selectedFile.size) : `选择发送文件后再生成 ${variant === "stun" ? "STUN " : ""}Offer`}
+              </span>
               <div className="mt-5 flex flex-wrap justify-center gap-3">
                 <PrimaryButton onClick={() => senderFileInputRef.current?.click()}>
                   <HardDrive aria-hidden="true" size={17} />
