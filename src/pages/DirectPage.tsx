@@ -425,6 +425,27 @@ function SecondaryButton({
   );
 }
 
+function StatusMessage({
+  message,
+  tone,
+}: {
+  message: string;
+  tone: "error" | "info";
+}) {
+  return (
+    <p
+      aria-live={tone === "error" ? "assertive" : "polite"}
+      className={`flex h-11 min-w-0 items-center overflow-hidden rounded-xl px-4 text-[14px] ${
+        tone === "error" ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"
+      }`}
+      role={tone === "error" ? "alert" : "status"}
+      title={message}
+    >
+      <span className="block min-w-0 truncate">{message}</span>
+    </p>
+  );
+}
+
 export default function DirectPage() {
   const senderPeerRef = useRef<RTCPeerConnection | null>(null);
   const receiverPeerRef = useRef<RTCPeerConnection | null>(null);
@@ -1109,9 +1130,7 @@ export default function DirectPage() {
                     </div>
                   </>
                 )}
-                <p className={`rounded-xl px-4 py-3 text-[14px] ${senderError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
-                  {senderError || senderStatus}
-                </p>
+                <StatusMessage message={senderError || senderStatus} tone={senderError ? "error" : "info"} />
               </div>
             )}
 
@@ -1142,9 +1161,7 @@ export default function DirectPage() {
                     </div>
                   </>
                 )}
-                <p className={`rounded-xl px-4 py-3 text-[14px] ${receiverError ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"}`}>
-                  {receiverError || receiverStatus}
-                </p>
+                <StatusMessage message={receiverError || receiverStatus} tone={receiverError ? "error" : "info"} />
               </div>
             )}
           </Panel>
@@ -1160,7 +1177,10 @@ export default function DirectPage() {
               <div className="mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px]">
                 <UploadCloud aria-hidden="true" size={46} />
               </div>
-              <strong className="max-w-full break-words text-[20px] font-extrabold text-[#071b3a]">
+              <strong
+                className="block h-[30px] w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[20px] font-extrabold leading-[30px] text-[#071b3a]"
+                title={selectedFile?.name}
+              >
                 {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
               <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "选择发送文件后再生成 Offer"}</span>
