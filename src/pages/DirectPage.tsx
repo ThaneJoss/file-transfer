@@ -1160,7 +1160,10 @@ export default function DirectPage() {
               <div className="mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px]">
                 <UploadCloud aria-hidden="true" size={46} />
               </div>
-              <strong className="max-w-full break-words text-[20px] font-extrabold text-[#071b3a]">
+              <strong
+                className="block h-[30px] w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[20px] font-extrabold leading-[30px] text-[#071b3a]"
+                title={selectedFile?.name}
+              >
                 {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
               <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "选择发送文件后再生成 Offer"}</span>
