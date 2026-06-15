@@ -77,6 +77,15 @@ type CandidateSummary = {
   total: number;
 };
 
+type CandidateType = "host" | "srflx" | "relay";
+
+type SelectedCandidatePair = {
+  local: string;
+  remote: string;
+  state: string;
+  rtt: string;
+};
+
 type TransferVariantConfig = {
   connectionType: string;
   description: string;
@@ -90,6 +99,7 @@ type TransferVariantConfig = {
   answerCandidateLabel: string;
   serverLabel?: string;
   requireSrflx: boolean;
+  signalCandidateTypes: CandidateType[];
 };
 
 const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
@@ -105,6 +115,7 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
     offerCandidateLabel: "Offer",
     answerCandidateLabel: "Answer",
     requireSrflx: false,
+    signalCandidateTypes: ["host", "srflx", "relay"],
   },
   stun: {
     connectionType: "STUN DataChannel",
@@ -119,10 +130,17 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
     answerCandidateLabel: "STUN Answer",
     serverLabel: "stun.cloudflare.com:3478",
     requireSrflx: true,
+    signalCandidateTypes: ["srflx", "relay"],
   },
 };
 
 const emptyCandidateSummary: CandidateSummary = { host: 0, srflx: 0, relay: 0, total: 0 };
+const emptySelectedPair: SelectedCandidatePair = {
+  local: "未连接",
+  remote: "未连接",
+  state: "unknown",
+  rtt: "-",
+};
 const chunkSize = 64 * 1024;
 const highWaterMark = 8 * 1024 * 1024;
 const lowWaterMark = 2 * 1024 * 1024;
@@ -207,6 +225,47 @@ function parseSignal(json: string): SignalPayload {
   return payload;
 }
 
+function getCandidateType(candidate: string): CandidateType | null {
+  if (/\styp host(\s|$)/.test(candidate)) return "host";
+  if (/\styp srflx(\s|$)/.test(candidate)) return "srflx";
+  if (/\styp relay(\s|$)/.test(candidate)) return "relay";
+  return null;
+}
+
+function isAllowedCandidate(candidate: string, allowedTypes: CandidateType[]) {
+  const type = getCandidateType(candidate);
+  return Boolean(type && allowedTypes.includes(type));
+}
+
+function filterSdpCandidates(sdp: string, allowedTypes: CandidateType[]) {
+  return sdp
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (!line.startsWith("a=candidate:")) return true;
+      return isAllowedCandidate(line.replace(/^a=/, ""), allowedTypes);
+    })
+    .join("\r\n");
+}
+
+function createSignalPayloadParts(
+  description: RTCSessionDescriptionInit,
+  candidates: RTCIceCandidateInit[],
+  allowedTypes: CandidateType[],
+) {
+  const filteredDescription = {
+    ...description,
+    sdp: description.sdp ? filterSdpCandidates(description.sdp, allowedTypes) : description.sdp,
+  };
+  const filteredCandidates = candidates.filter((candidate) =>
+    candidate.candidate ? isAllowedCandidate(candidate.candidate, allowedTypes) : false,
+  );
+  return {
+    description: filteredDescription,
+    candidates: filteredCandidates,
+    summary: summarizeCandidates(filteredDescription, filteredCandidates),
+  };
+}
+
 function summarizeCandidates(
   description: RTCSessionDescriptionInit | null,
   candidates: RTCIceCandidateInit[] = [],
@@ -225,9 +284,10 @@ function summarizeCandidates(
 
   for (const candidate of uniqueCandidates) {
     summary.total += 1;
-    if (/\styp host(\s|$)/.test(candidate)) summary.host += 1;
-    if (/\styp srflx(\s|$)/.test(candidate)) summary.srflx += 1;
-    if (/\styp relay(\s|$)/.test(candidate)) summary.relay += 1;
+    const type = getCandidateType(candidate);
+    if (type === "host") summary.host += 1;
+    if (type === "srflx") summary.srflx += 1;
+    if (type === "relay") summary.relay += 1;
   }
   return summary;
 }
@@ -265,6 +325,16 @@ function formatStunStatus(summary: CandidateSummary, gatheringStates: string[]) 
   return "等待 STUN 收集";
 }
 
+function formatSelectedPair(pair: SelectedCandidatePair) {
+  if (pair.local === "未连接" && pair.remote === "未连接") return "未连接";
+  return `${pair.local} -> ${pair.remote}`;
+}
+
+function formatStepError(variant: TransferVariant, step: string, error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  return variant === "stun" ? `${step}：${message}` : message;
+}
+
 function assertHasCandidates(
   description: RTCSessionDescriptionInit | null,
   candidates: RTCIceCandidateInit[],
@@ -277,6 +347,13 @@ function assertHasCandidates(
   }
   if (requireSrflx && summary.srflx === 0) {
     throw new Error(`${label} 没有收集到 STUN srflx 候选地址，请确认网络可以访问 Cloudflare STUN 后重新生成。`);
+  }
+}
+
+function assertUsableRemoteStunCandidates(payload: SignalPayload, label: string) {
+  const summary = summarizeCandidates(payload.description, payload.candidates);
+  if (summary.srflx + summary.relay === 0) {
+    throw new Error(`${label} 没有可用于 STUN 连接的 srflx/relay 候选。发送方需要重新生成 STUN 信令。`);
   }
 }
 
@@ -314,6 +391,7 @@ function createPeerConnection(
   config: RTCConfiguration,
   onState: (peer: RTCPeerConnection) => void,
   onError: (message: string) => void,
+  onIceCandidateError?: (message: string) => void,
 ) {
   const peer = new RTCPeerConnection(config);
   const notify = () => onState(peer);
@@ -322,7 +400,9 @@ function createPeerConnection(
   peer.addEventListener("signalingstatechange", notify);
   peer.addEventListener("icegatheringstatechange", notify);
   peer.addEventListener("icecandidateerror", (event) => {
-    onError(`ICE 候选收集失败：${event.errorText || event.errorCode}`);
+    const message = `ICE 候选收集失败：${event.errorText || event.errorCode}`;
+    if (onIceCandidateError) onIceCandidateError(message);
+    else onError(message);
   });
   return peer;
 }
@@ -348,6 +428,78 @@ function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = iceGatheringTi
     }, timeoutMs);
     peer.addEventListener("icegatheringstatechange", onChange);
   });
+}
+
+async function runIceProbe(config: RTCConfiguration) {
+  const peer = new RTCPeerConnection(config);
+  const ice = collectIceCandidates(peer);
+  try {
+    peer.createDataChannel("stun-probe");
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    await waitForIceGathering(peer);
+    ice.stop();
+    return summarizeCandidates(peer.localDescription, ice.candidates);
+  } finally {
+    ice.stop();
+    peer.close();
+  }
+}
+
+function getStatsValue(stats: RTCStats, key: string) {
+  return (stats as unknown as Record<string, unknown>)[key];
+}
+
+function formatCandidateStats(stats: RTCStats | undefined) {
+  if (!stats) return "unknown";
+  const candidateType = String(getStatsValue(stats, "candidateType") ?? "unknown");
+  const protocol = String(getStatsValue(stats, "protocol") ?? getStatsValue(stats, "relayProtocol") ?? "");
+  const address = String(getStatsValue(stats, "address") ?? getStatsValue(stats, "ip") ?? "?");
+  const port = getStatsValue(stats, "port");
+  const portText = typeof port === "number" || typeof port === "string" ? `:${port}` : "";
+  return `${candidateType} ${protocol ? `${protocol} ` : ""}${address}${portText}`;
+}
+
+async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<SelectedCandidatePair> {
+  const report = await peer.getStats();
+  let selectedPair: RTCStats | undefined;
+
+  for (const stats of report.values()) {
+    if (stats.type !== "transport") continue;
+    const selectedPairId = getStatsValue(stats, "selectedCandidatePairId");
+    if (typeof selectedPairId === "string") {
+      selectedPair = report.get(selectedPairId);
+      break;
+    }
+  }
+
+  if (!selectedPair) {
+    for (const stats of report.values()) {
+      if (stats.type !== "candidate-pair") continue;
+      const nominated = getStatsValue(stats, "nominated") === true;
+      const state = getStatsValue(stats, "state");
+      if (nominated && state === "succeeded") {
+        selectedPair = stats;
+        break;
+      }
+    }
+  }
+
+  if (!selectedPair) return emptySelectedPair;
+
+  const localCandidateId = getStatsValue(selectedPair, "localCandidateId");
+  const remoteCandidateId = getStatsValue(selectedPair, "remoteCandidateId");
+  const localStats = typeof localCandidateId === "string" ? report.get(localCandidateId) : undefined;
+  const remoteStats = typeof remoteCandidateId === "string" ? report.get(remoteCandidateId) : undefined;
+  const rtt = getStatsValue(selectedPair, "currentRoundTripTime");
+  const rttText = typeof rtt === "number" ? `${Math.round(rtt * 1000)} ms` : "-";
+
+  return {
+    local: formatCandidateStats(localStats),
+    remote: formatCandidateStats(remoteStats),
+    state: String(getStatsValue(selectedPair, "state") ?? "unknown"),
+    rtt: rttText,
+  };
 }
 
 function waitForDataChannelOpen(
@@ -546,6 +698,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
   const receivedBytesRef = useRef(0);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const sendInFlightRef = useRef(false);
+  const stunProbeInFlightRef = useRef(false);
   const senderFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -577,6 +730,12 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [transferMode, setTransferMode] = useState<TransferMode>(null);
   const [senderHandshakeStage, setSenderHandshakeStage] = useState<SenderHandshakeStage>("offer");
+  const [isStunProbing, setIsStunProbing] = useState(false);
+  const [stunProbeStatus, setStunProbeStatus] = useState("等待 probe");
+  const [stunProbeError, setStunProbeError] = useState("");
+  const [stunProbeSummary, setStunProbeSummary] = useState<CandidateSummary>(emptyCandidateSummary);
+  const [senderSelectedPair, setSenderSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
+  const [receiverSelectedPair, setReceiverSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
 
   useEffect(() => {
     return () => {
@@ -590,10 +749,17 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     receivedFilesRef.current = receivedFiles;
   }, [receivedFiles]);
 
+  useEffect(() => {
+    if (variant === "stun") {
+      void probeStunServer();
+    }
+  }, []);
+
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
   const combinedCandidateSummary = mergeCandidateSummaries(senderCandidateSummary, receiverCandidateSummary);
-  const stunStatus = formatStunStatus(combinedCandidateSummary, [
+  const combinedStunSummary = mergeCandidateSummaries(stunProbeSummary, combinedCandidateSummary);
+  const stunStatus = formatStunStatus(combinedStunSummary, [
     senderIceGatheringState,
     receiverIceGatheringState,
   ]);
@@ -603,9 +769,9 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       ? [
           {
             label: "STUN",
-            meta: combinedCandidateSummary.srflx > 0 ? "已发现 srflx" : "等待发现",
+            meta: combinedStunSummary.srflx > 0 ? "已发现 srflx" : isStunProbing ? "probe 中" : "等待发现",
             icon: Server,
-            active: combinedCandidateSummary.srflx > 0,
+            active: combinedStunSummary.srflx > 0,
           },
           {
             label: "信令",
@@ -661,9 +827,15 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
             label: "STUN状态",
             value: stunStatus,
             icon: Server,
-            status: combinedCandidateSummary.srflx > 0 ? ("online" as const) : undefined,
+            status: combinedStunSummary.srflx > 0 ? ("online" as const) : undefined,
           },
           { label: "STUN服务器", value: config.serverLabel ?? "未配置", icon: Server },
+          {
+            label: "独立Probe",
+            value: stunProbeError || `${stunProbeStatus}，${formatStoredCandidateSummary(stunProbeSummary)}`,
+            icon: Gauge,
+            status: stunProbeSummary.srflx > 0 ? ("online" as const) : undefined,
+          },
         ]
       : []),
     {
@@ -682,8 +854,11 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     { label: "接收通道", value: receiverChannelState, icon: Wifi },
     ...(variant === "stun"
       ? [
-          { label: "发送端候选", value: formatStoredCandidateSummary(senderCandidateSummary), icon: FileText },
-          { label: "接收端候选", value: formatStoredCandidateSummary(receiverCandidateSummary), icon: FileText },
+          { label: "本轮Offer候选", value: formatStoredCandidateSummary(senderCandidateSummary), icon: FileText },
+          { label: "本轮Answer候选", value: formatStoredCandidateSummary(receiverCandidateSummary), icon: FileText },
+          { label: "发送最终路径", value: formatSelectedPair(senderSelectedPair), icon: Link2 },
+          { label: "接收最终路径", value: formatSelectedPair(receiverSelectedPair), icon: Link2 },
+          { label: "最终RTT", value: senderSelectedPair.rtt !== "-" ? senderSelectedPair.rtt : receiverSelectedPair.rtt, icon: Gauge },
         ]
       : []),
     { label: "选中文件", value: selectedFile ? selectedFile.name : "未选择", icon: HardDrive },
@@ -721,6 +896,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     setSenderIceState("new");
     setSenderIceGatheringState("new");
     setSenderChannelState("closed");
+    setSenderSelectedPair(emptySelectedPair);
   }
 
   function closeReceiverPeer() {
@@ -736,6 +912,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     setReceiverIceState("new");
     setReceiverIceGatheringState("new");
     setReceiverChannelState("closed");
+    setReceiverSelectedPair(emptySelectedPair);
   }
 
   function resetSender() {
@@ -763,6 +940,50 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     setReceivedBytes(0);
   }
 
+  async function probeStunServer() {
+    if (variant !== "stun" || stunProbeInFlightRef.current) return;
+
+    try {
+      stunProbeInFlightRef.current = true;
+      setIsStunProbing(true);
+      setStunProbeError("");
+      setStunProbeStatus("步骤1 独立 probe 中");
+      setStunProbeSummary(emptyCandidateSummary);
+      const summary = await runIceProbe(config.rtcConfig);
+      setStunProbeSummary(summary);
+      if (summary.srflx === 0) {
+        throw new Error(`Cloudflare STUN 没有返回 srflx。${formatStoredCandidateSummary(summary)}`);
+      }
+      setStunProbeStatus("步骤1 probe 通过");
+    } catch (error) {
+      setStunProbeStatus("步骤1 probe 失败");
+      setStunProbeError(formatStepError(variant, "步骤1 独立 STUN probe 失败", error, "Cloudflare STUN probe 失败。"));
+    } finally {
+      stunProbeInFlightRef.current = false;
+      setIsStunProbing(false);
+    }
+  }
+
+  async function updateSelectedCandidatePair(role: "sender" | "receiver", peer: RTCPeerConnection | null) {
+    if (variant !== "stun" || !peer) return;
+
+    try {
+      const pair = await getSelectedCandidatePair(peer);
+      if (role === "sender") setSenderSelectedPair(pair);
+      else setReceiverSelectedPair(pair);
+
+      if (!pair.local.includes("srflx") && !pair.local.includes("relay") && !pair.remote.includes("srflx") && !pair.remote.includes("relay")) {
+        const message = "步骤3 最终 ICE candidate pair 不是 STUN 暴露的 srflx/relay 路径，请重新生成 STUN 信令。";
+        if (role === "sender") setSenderError(message);
+        else setReceiverError(message);
+      }
+    } catch (error) {
+      const message = formatStepError(variant, "步骤3 读取最终 candidate pair 失败", error, "读取最终 candidate pair 失败。");
+      if (role === "sender") setSenderError(message);
+      else setReceiverError(message);
+    }
+  }
+
   function handleFile(file: File | null) {
     setSelectedFile(file);
     setSenderProgress(0);
@@ -787,6 +1008,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     channel.addEventListener("open", () => {
       setSenderChannelState(channel.readyState);
       setSenderStatus("DataChannel 已打开，准备发送文件。");
+      void updateSelectedCandidatePair("sender", senderPeerRef.current);
     });
     channel.addEventListener("close", () => {
       setSenderChannelState(channel.readyState);
@@ -803,6 +1025,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     channel.addEventListener("open", () => {
       setReceiverChannelState(channel.readyState);
       setReceiverStatus("DataChannel 已打开，等待文件数据。");
+      void updateSelectedCandidatePair("receiver", receiverPeerRef.current);
     });
     channel.addEventListener("close", () => {
       setReceiverChannelState(channel.readyState);
@@ -832,7 +1055,12 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       setSentBytes(0);
       closeSenderPeer();
 
-      const peer = createPeerConnection(config.rtcConfig, updateSenderPeerState, setSenderError);
+      const peer = createPeerConnection(
+        config.rtcConfig,
+        updateSenderPeerState,
+        setSenderError,
+        variant === "stun" ? () => undefined : undefined,
+      );
       const ice = collectIceCandidates(peer);
       senderPeerRef.current = peer;
       attachSenderChannel(peer.createDataChannel("file-transfer", { ordered: true }));
@@ -845,21 +1073,26 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Offer。");
       }
-      assertHasCandidates(peer.localDescription, ice.candidates, config.offerCandidateLabel, config.requireSrflx);
-      setSenderCandidateSummary(summarizeCandidates(peer.localDescription, ice.candidates));
+      const signalParts = createSignalPayloadParts(
+        peer.localDescription.toJSON(),
+        ice.candidates,
+        config.signalCandidateTypes,
+      );
+      assertHasCandidates(signalParts.description, signalParts.candidates, config.offerCandidateLabel, config.requireSrflx);
+      setSenderCandidateSummary(signalParts.summary);
 
       const encoded = await encodeSignal({
         kind: config.signalKind,
         role: "offer",
-        description: peer.localDescription.toJSON(),
-        candidates: ice.candidates,
+        description: signalParts.description,
+        candidates: signalParts.candidates,
         createdAt: Date.now(),
       });
       setSenderOffer(encoded);
       setSenderHandshakeStage("offer");
-      setSenderStatus(`完整 ${config.offerCandidateLabel} 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给接收方。`);
+      setSenderStatus(`步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`);
     } catch (error) {
-      setSenderError(error instanceof Error ? error.message : "生成 Offer 失败。");
+      setSenderError(formatStepError(variant, "步骤2 生成 STUN Offer 失败", error, "生成 Offer 失败。"));
     }
   }
 
@@ -883,9 +1116,17 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       if (payload.kind !== config.signalKind) {
         throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Offer。请确认双方打开的是同一个页面。`);
       }
+      if (variant === "stun") {
+        assertUsableRemoteStunCandidates(payload, "发送方 STUN Offer");
+      }
       setSenderCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
-      const peer = createPeerConnection(config.rtcConfig, updateReceiverPeerState, setReceiverError);
+      const peer = createPeerConnection(
+        config.rtcConfig,
+        updateReceiverPeerState,
+        setReceiverError,
+        variant === "stun" ? () => undefined : undefined,
+      );
       const ice = collectIceCandidates(peer);
       receiverPeerRef.current = peer;
       peer.addEventListener("datachannel", (event) => attachReceiverChannel(event.channel));
@@ -900,20 +1141,25 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       if (!peer.localDescription) {
         throw new Error("没有生成本地 Answer。");
       }
-      assertHasCandidates(peer.localDescription, ice.candidates, config.answerCandidateLabel, config.requireSrflx);
-      setReceiverCandidateSummary(summarizeCandidates(peer.localDescription, ice.candidates));
+      const signalParts = createSignalPayloadParts(
+        peer.localDescription.toJSON(),
+        ice.candidates,
+        config.signalCandidateTypes,
+      );
+      assertHasCandidates(signalParts.description, signalParts.candidates, config.answerCandidateLabel, config.requireSrflx);
+      setReceiverCandidateSummary(signalParts.summary);
 
       const encoded = await encodeSignal({
         kind: config.signalKind,
         role: "answer",
-        description: peer.localDescription.toJSON(),
-        candidates: ice.candidates,
+        description: signalParts.description,
+        candidates: signalParts.candidates,
         createdAt: Date.now(),
       });
       setReceiverAnswer(encoded);
-      setReceiverStatus(`完整 ${config.answerCandidateLabel} 已生成，${formatCandidateSummary(peer.localDescription, ice.candidates)}。复制给发送方。`);
+      setReceiverStatus(`步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`);
     } catch (error) {
-      setReceiverError(error instanceof Error ? error.message : "生成 Answer 失败。");
+      setReceiverError(formatStepError(variant, "步骤2 生成 STUN Answer 失败", error, "生成 Answer 失败。"));
     }
   }
 
@@ -932,9 +1178,12 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       if (payload.kind !== config.signalKind) {
         throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Answer。请确认双方打开的是同一个页面。`);
       }
+      if (variant === "stun") {
+        assertUsableRemoteStunCandidates(payload, "接收方 STUN Answer");
+      }
       setReceiverCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
-      setSenderStatus("正在应用 Answer，等待 DataChannel 打开...");
+      setSenderStatus(variant === "stun" ? "步骤3 正在应用 STUN Answer，等待 DataChannel 打开..." : "正在应用 Answer，等待 DataChannel 打开...");
       await peer.setRemoteDescription(payload.description);
       await addPayloadCandidates(peer, payload);
       updateSenderPeerState(peer);
@@ -943,9 +1192,10 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         throw new Error("发送通道不存在，请重新生成 Offer。");
       }
       await waitForDataChannelOpen(channel, peer);
+      await updateSelectedCandidatePair("sender", peer);
       await sendSelectedFile();
     } catch (error) {
-      setSenderError(error instanceof Error ? error.message : "应用 Answer 失败。");
+      setSenderError(formatStepError(variant, "步骤3 建立 STUN 连接失败", error, "应用 Answer 失败。"));
     }
   }
 
@@ -1226,6 +1476,31 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
               <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
             </div>
+
+            {variant === "stun" && (
+              <div className="mb-4 grid gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">步骤1 Cloudflare STUN Probe</h3>
+                    <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={stunProbeError || stunProbeStatus}>
+                      {stunProbeError || stunProbeStatus}
+                    </p>
+                  </div>
+                  <SecondaryButton onClick={() => void probeStunServer()} disabled={isStunProbing}>
+                    <Server aria-hidden="true" size={17} />
+                    Probe
+                  </SecondaryButton>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center text-[13px] max-[560px]:grid-cols-2">
+                  {(["host", "srflx", "relay", "total"] as const).map((key) => (
+                    <span className="rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
+                      <span className="block text-[#6a7f9e]">{key}</span>
+                      <strong className="text-[15px] text-[#142a4f]">{stunProbeSummary[key]}</strong>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!transferMode && (
               <div className="grid gap-3">
