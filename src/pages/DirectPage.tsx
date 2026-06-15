@@ -28,7 +28,7 @@ type SignalPayload = {
   createdAt: number;
 };
 
-type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal";
+type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal" | "turn-webrtc-signal";
 
 type TransferMeta = {
   kind: "meta";
@@ -68,7 +68,7 @@ type DetailItem = {
 
 type TransferMode = "send" | "receive" | null;
 type SenderHandshakeStage = "offer" | "answer";
-type TransferVariant = "direct" | "stun";
+type TransferVariant = "direct" | "stun" | "turn";
 
 type CandidateSummary = {
   host: number;
@@ -78,12 +78,22 @@ type CandidateSummary = {
 };
 
 type CandidateType = "host" | "srflx" | "relay";
+type TurnTransport = "udp" | "tcp";
+
+type TurnTransportSummary = Record<TurnTransport, number> & {
+  total: number;
+};
 
 type SelectedCandidatePair = {
   local: string;
   remote: string;
   state: string;
   rtt: string;
+};
+
+type CloudflareTurnResponse = {
+  iceServers?: unknown;
+  errors?: Array<{ message?: string }>;
 };
 
 type TransferVariantConfig = {
@@ -98,7 +108,7 @@ type TransferVariantConfig = {
   offerCandidateLabel: string;
   answerCandidateLabel: string;
   serverLabel?: string;
-  requireSrflx: boolean;
+  requiredCandidateTypes?: CandidateType[];
   signalCandidateTypes: CandidateType[];
 };
 
@@ -114,7 +124,6 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
     answerGatheringStatus: "正在读取 Offer，并收集接收方 host 候选地址...",
     offerCandidateLabel: "Offer",
     answerCandidateLabel: "Answer",
-    requireSrflx: false,
     signalCandidateTypes: ["host", "srflx", "relay"],
   },
   stun: {
@@ -129,23 +138,46 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
     offerCandidateLabel: "STUN Offer",
     answerCandidateLabel: "STUN Answer",
     serverLabel: "stun.cloudflare.com:3478",
-    requireSrflx: true,
+    requiredCandidateTypes: ["srflx"],
     signalCandidateTypes: ["srflx", "relay"],
+  },
+  turn: {
+    connectionType: "TURN Relay DataChannel",
+    description: "强制通过 TURN relay 中继建立 DataChannel，适合双方网络无法直连的场景。",
+    signalKind: "turn-webrtc-signal",
+    rtcConfig: { iceServers: [], iceTransportPolicy: "relay" },
+    initialSenderStatus: "选择文件后通过 TURN 生成 Offer。",
+    initialReceiverStatus: "等待发送方 TURN Offer。",
+    offerGatheringStatus: "正在创建 WebRTC Offer，并通过 TURN 收集 relay 候选地址...",
+    answerGatheringStatus: "正在读取 TURN Offer，并通过 TURN 收集接收方 relay 候选地址...",
+    offerCandidateLabel: "TURN Offer",
+    answerCandidateLabel: "TURN Answer",
+    serverLabel: "等待生成 Cloudflare TURN iceServers",
+    requiredCandidateTypes: ["relay"],
+    signalCandidateTypes: ["relay"],
   },
 };
 
 const emptyCandidateSummary: CandidateSummary = { host: 0, srflx: 0, relay: 0, total: 0 };
+const emptyTurnTransportSummary: TurnTransportSummary = { udp: 0, tcp: 0, total: 0 };
 const emptySelectedPair: SelectedCandidatePair = {
   local: "未连接",
   remote: "未连接",
   state: "unknown",
   rtt: "-",
 };
-const chunkSize = 64 * 1024;
-const highWaterMark = 8 * 1024 * 1024;
-const lowWaterMark = 2 * 1024 * 1024;
+const chunkSize = 256 * 1024;
+const highWaterMark = 16 * 1024 * 1024;
+const lowWaterMark = 4 * 1024 * 1024;
+const progressUpdateIntervalMs = 100;
 const iceGatheringTimeoutMs = 30000;
+const turnIceGatheringTimeoutMs = 90000;
+const turnProbeGatheringTimeoutMs = 15000;
 const channelOpenTimeoutMs = 18000;
+const turnChannelOpenTimeoutMs = 90000;
+const defaultTurnKeyId = "";
+const defaultTurnApiToken = "";
+const turnTransports: TurnTransport[] = ["udp", "tcp"];
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
@@ -216,7 +248,9 @@ async function decodeSignal(value: string): Promise<SignalPayload> {
 function parseSignal(json: string): SignalPayload {
   const payload = JSON.parse(json) as SignalPayload;
   if (
-    (payload.kind !== "direct-webrtc-signal" && payload.kind !== "stun-webrtc-signal") ||
+    (payload.kind !== "direct-webrtc-signal" &&
+      payload.kind !== "stun-webrtc-signal" &&
+      payload.kind !== "turn-webrtc-signal") ||
     !payload.description?.type ||
     !payload.description.sdp
   ) {
@@ -237,6 +271,12 @@ function isAllowedCandidate(candidate: string, allowedTypes: CandidateType[]) {
   return Boolean(type && allowedTypes.includes(type));
 }
 
+function isCandidateType(candidate: string, types?: CandidateType[]) {
+  if (!types?.length) return true;
+  const type = getCandidateType(candidate);
+  return Boolean(type && types.includes(type));
+}
+
 function filterSdpCandidates(sdp: string, allowedTypes: CandidateType[]) {
   return sdp
     .split(/\r?\n/)
@@ -247,14 +287,24 @@ function filterSdpCandidates(sdp: string, allowedTypes: CandidateType[]) {
     .join("\r\n");
 }
 
+function ensureEndOfCandidates(sdp: string) {
+  if (/^a=end-of-candidates$/m.test(sdp)) return sdp;
+  return `${sdp.replace(/\r?\n*$/, "")}\r\na=end-of-candidates\r\n`;
+}
+
 function createSignalPayloadParts(
   description: RTCSessionDescriptionInit,
   candidates: RTCIceCandidateInit[],
   allowedTypes: CandidateType[],
+  includeEndOfCandidates = true,
 ) {
   const filteredDescription = {
     ...description,
-    sdp: description.sdp ? filterSdpCandidates(description.sdp, allowedTypes) : description.sdp,
+    sdp: description.sdp
+      ? includeEndOfCandidates
+        ? ensureEndOfCandidates(filterSdpCandidates(description.sdp, allowedTypes))
+        : filterSdpCandidates(description.sdp, allowedTypes)
+      : description.sdp,
   };
   const filteredCandidates = candidates.filter((candidate) =>
     candidate.candidate ? isAllowedCandidate(candidate.candidate, allowedTypes) : false,
@@ -318,11 +368,66 @@ function formatStoredCandidateSummary(summary: CandidateSummary) {
   return `${summary.total} 个，host ${summary.host}，srflx ${summary.srflx}，relay ${summary.relay}`;
 }
 
-function formatStunStatus(summary: CandidateSummary, gatheringStates: string[]) {
-  if (summary.srflx > 0) return `已发现公网映射，srflx ${summary.srflx}`;
-  if (gatheringStates.some((state) => state === "gathering")) return "正在通过 STUN 收集";
-  if (summary.total > 0) return "仅有本地候选，未发现 srflx";
-  return "等待 STUN 收集";
+function hasRequiredCandidate(summary: CandidateSummary, requiredTypes?: CandidateType[]) {
+  if (!requiredTypes?.length) return summary.total > 0;
+  return requiredTypes.some((type) => summary[type] > 0);
+}
+
+function formatRequiredCandidateTypes(requiredTypes?: CandidateType[]) {
+  return requiredTypes?.join("/") ?? "ICE";
+}
+
+function formatIceServerUrls(iceServers: RTCIceServer[]) {
+  const urls = iceServers.flatMap((server) => {
+    if (Array.isArray(server.urls)) return server.urls;
+    return server.urls ? [server.urls] : [];
+  });
+  if (urls.length === 0) return "未配置";
+  return urls.join(", ");
+}
+
+function getTurnUrlTransport(url: string): TurnTransport | null {
+  const lowerUrl = url.toLowerCase();
+  if (lowerUrl.startsWith("turns:")) return "tcp";
+  if (!lowerUrl.startsWith("turn:")) return null;
+  if (lowerUrl.includes("transport=tcp")) return "tcp";
+  if (lowerUrl.includes("transport=udp")) return "udp";
+  return "udp";
+}
+
+function filterIceServersByTurnTransport(iceServers: RTCIceServer[], transport: TurnTransport) {
+  return iceServers.flatMap<RTCIceServer>((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : server.urls ? [server.urls] : [];
+    const filteredUrls = urls.filter((url) => getTurnUrlTransport(url) === transport);
+    if (filteredUrls.length === 0) return [];
+
+    return [
+      {
+        urls: filteredUrls.length === 1 ? filteredUrls[0] : filteredUrls,
+        username: server.username,
+        credential: server.credential,
+      },
+    ];
+  });
+}
+
+function mergeTurnTransportSummary(summary: TurnTransportSummary, transport: TurnTransport, relayCount: number) {
+  const next = { ...summary, [transport]: relayCount };
+  next.total = next.udp + next.tcp;
+  return next;
+}
+
+function formatRelayServerStatus(
+  protocolLabel: string,
+  summary: CandidateSummary,
+  gatheringStates: string[],
+  requiredTypes?: CandidateType[],
+) {
+  const required = formatRequiredCandidateTypes(requiredTypes);
+  if (hasRequiredCandidate(summary, requiredTypes)) return `已收集 ${required} 候选`;
+  if (gatheringStates.some((state) => state === "gathering")) return `正在通过 ${protocolLabel} 收集`;
+  if (summary.total > 0) return `已收集候选，但未得到 ${required}`;
+  return `等待 ${protocolLabel} 收集`;
 }
 
 function formatSelectedPair(pair: SelectedCandidatePair) {
@@ -332,42 +437,58 @@ function formatSelectedPair(pair: SelectedCandidatePair) {
 
 function formatStepError(variant: TransferVariant, step: string, error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
-  return variant === "stun" ? `${step}：${message}` : message;
+  return variant === "direct" ? message : `${step}：${message}`;
 }
 
 function assertHasCandidates(
   description: RTCSessionDescriptionInit | null,
   candidates: RTCIceCandidateInit[],
   label: string,
-  requireSrflx: boolean,
+  requiredTypes?: CandidateType[],
 ) {
   const summary = summarizeCandidates(description, candidates);
   if (summary.total === 0) {
     throw new Error(`${label} 没有包含 ICE candidate，请刷新页面后重新生成。`);
   }
-  if (requireSrflx && summary.srflx === 0) {
-    throw new Error(`${label} 没有收集到 STUN srflx 候选地址，请确认网络可以访问 Cloudflare STUN 后重新生成。`);
+  if (requiredTypes?.length && !hasRequiredCandidate(summary, requiredTypes)) {
+    throw new Error(`${label} 没有收集到 ${formatRequiredCandidateTypes(requiredTypes)} 候选地址，请确认网络可以访问服务器后重新生成。`);
   }
 }
 
-function assertUsableRemoteStunCandidates(payload: SignalPayload, label: string) {
+function assertUsableRemoteCandidates(payload: SignalPayload, label: string, requiredTypes?: CandidateType[]) {
   const summary = summarizeCandidates(payload.description, payload.candidates);
-  if (summary.srflx + summary.relay === 0) {
-    throw new Error(`${label} 没有可用于 STUN 连接的 srflx/relay 候选。发送方需要重新生成 STUN 信令。`);
+  if (requiredTypes?.length && !hasRequiredCandidate(summary, requiredTypes)) {
+    throw new Error(`${label} 没有可用于连接的 ${formatRequiredCandidateTypes(requiredTypes)} 候选。对方需要重新生成信令。`);
   }
 }
 
-function collectIceCandidates(peer: RTCPeerConnection) {
+function formatIceCandidateError(event: RTCPeerConnectionIceErrorEvent) {
+  const url = event.url ? `${event.url} ` : "";
+  return `${url}${event.errorCode}${event.errorText ? ` ${event.errorText}` : ""}`;
+}
+
+function collectIceCandidates(peer: RTCPeerConnection, onChange?: () => void) {
   const candidates: RTCIceCandidateInit[] = [];
+  const errors: string[] = [];
   const onCandidate = (event: RTCPeerConnectionIceEvent) => {
     if (event.candidate) {
       candidates.push(event.candidate.toJSON());
+      onChange?.();
     }
   };
+  const onCandidateError = (event: RTCPeerConnectionIceErrorEvent) => {
+    errors.push(formatIceCandidateError(event));
+    onChange?.();
+  };
   peer.addEventListener("icecandidate", onCandidate);
+  peer.addEventListener("icecandidateerror", onCandidateError);
   return {
     candidates,
-    stop: () => peer.removeEventListener("icecandidate", onCandidate),
+    errors,
+    stop: () => {
+      peer.removeEventListener("icecandidate", onCandidate);
+      peer.removeEventListener("icecandidateerror", onCandidateError);
+    },
   };
 }
 
@@ -385,6 +506,7 @@ async function addPayloadCandidates(peer: RTCPeerConnection, payload: SignalPayl
     if (!candidate.candidate || sdpCandidates.has(candidate.candidate)) continue;
     await peer.addIceCandidate(candidate);
   }
+  await peer.addIceCandidate();
 }
 
 function createPeerConnection(
@@ -400,14 +522,32 @@ function createPeerConnection(
   peer.addEventListener("signalingstatechange", notify);
   peer.addEventListener("icegatheringstatechange", notify);
   peer.addEventListener("icecandidateerror", (event) => {
-    const message = `ICE 候选收集失败：${event.errorText || event.errorCode}`;
+    const message = `ICE 候选收集失败：${formatIceCandidateError(event)}`;
     if (onIceCandidateError) onIceCandidateError(message);
     else onError(message);
   });
   return peer;
 }
 
-function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = iceGatheringTimeoutMs) {
+function formatIceGatheringTimeout(
+  candidates: RTCIceCandidateInit[],
+  errors: string[],
+) {
+  const summary = formatStoredCandidateSummary(summarizeCandidates(null, candidates));
+  const errorText = errors.length > 0 ? `最近的 ICE 错误：${errors.slice(-4).join("；")}` : "没有收到浏览器返回的 ICE 错误。";
+  return `ICE candidate 收集没有进入 complete。已收集：${summary}。${errorText}`;
+}
+
+function hasCandidateType(candidates: RTCIceCandidateInit[], types?: CandidateType[]) {
+  if (!types?.length) return candidates.length > 0;
+  return candidates.some((candidate) => candidate.candidate && isCandidateType(candidate.candidate, types));
+}
+
+function waitForIceGathering(
+  peer: RTCPeerConnection,
+  collection?: { candidates: RTCIceCandidateInit[]; errors: string[] },
+  timeoutMs = iceGatheringTimeoutMs,
+) {
   if (peer.iceGatheringState === "complete") return Promise.resolve();
 
   return new Promise<void>((resolve, reject) => {
@@ -424,26 +564,140 @@ function waitForIceGathering(peer: RTCPeerConnection, timeoutMs = iceGatheringTi
       if (peer.iceGatheringState === "complete") done();
     };
     const timer = window.setTimeout(() => {
-      done(new Error("ICE candidate 收集没有完成，请刷新页面后重新生成完整 Offer/Answer。"));
+      done(new Error(formatIceGatheringTimeout(collection?.candidates ?? [], collection?.errors ?? [])));
     }, timeoutMs);
     peer.addEventListener("icegatheringstatechange", onChange);
   });
 }
 
-async function runIceProbe(config: RTCConfiguration) {
-  const peer = new RTCPeerConnection(config);
-  const ice = collectIceCandidates(peer);
-  try {
-    peer.createDataChannel("stun-probe");
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    await waitForIceGathering(peer);
-    ice.stop();
-    return summarizeCandidates(peer.localDescription, ice.candidates);
-  } finally {
-    ice.stop();
-    peer.close();
+function observeIceProbe({
+  config,
+  requiredTypes,
+  timeoutMs = iceGatheringTimeoutMs,
+  onSummary,
+  onReady,
+  onComplete,
+}: {
+  config: RTCConfiguration;
+  requiredTypes?: CandidateType[];
+  timeoutMs?: number;
+  onSummary: (summary: CandidateSummary) => void;
+  onReady: (summary: CandidateSummary) => void;
+  onComplete: (summary: CandidateSummary) => void;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const peer = new RTCPeerConnection(config);
+    let ready = false;
+    let finished = false;
+    let timeout: number | undefined;
+    let ice: ReturnType<typeof collectIceCandidates>;
+
+    const finish = (complete = false) => {
+      if (finished) return;
+      finished = true;
+      if (timeout != null) window.clearTimeout(timeout);
+      peer.removeEventListener("icegatheringstatechange", onGatheringChange);
+      ice.stop();
+      const summary = summarizeCandidates(peer.localDescription, ice.candidates);
+      if (complete) onComplete(summary);
+      peer.close();
+    };
+
+    const fail = (error: Error) => {
+      finish(false);
+      reject(error);
+    };
+
+    const publish = () => {
+      const summary = summarizeCandidates(peer.localDescription, ice.candidates);
+      onSummary(summary);
+      if (!ready && hasRequiredCandidate(summary, requiredTypes)) {
+        ready = true;
+        onReady(summary);
+        resolve();
+      }
+      return summary;
+    };
+
+    const onGatheringChange = () => {
+      const summary = publish();
+      if (peer.iceGatheringState === "complete") {
+        if (ready) finish(true);
+        else fail(new Error(`${formatStoredCandidateSummary(summary)}。${formatIceGatheringTimeout(ice.candidates, ice.errors)}`));
+      }
+    };
+
+    ice = collectIceCandidates(peer, publish);
+    peer.addEventListener("icegatheringstatechange", onGatheringChange);
+
+    void (async () => {
+      try {
+        peer.createDataChannel("stun-probe");
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        publish();
+        timeout = window.setTimeout(() => {
+          if (!ready) {
+            const summary = summarizeCandidates(peer.localDescription, ice.candidates);
+            const errorText = formatIceGatheringTimeout(ice.candidates, ice.errors);
+            fail(new Error(`${formatStoredCandidateSummary(summary)}。${errorText}`));
+          }
+        }, timeoutMs);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error("ICE probe 启动失败。"));
+      }
+    })();
+  });
+}
+
+function normalizeIceServers(value: unknown): RTCIceServer[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const server = item as Record<string, unknown>;
+    const urls = server.urls;
+    const normalizedUrls =
+      typeof urls === "string"
+        ? urls
+        : Array.isArray(urls) && urls.every((url) => typeof url === "string")
+          ? urls
+          : null;
+    if (!normalizedUrls) return [];
+
+    return [
+      {
+        urls: normalizedUrls,
+        username: typeof server.username === "string" ? server.username : undefined,
+        credential: typeof server.credential === "string" ? server.credential : undefined,
+      },
+    ];
+  });
+}
+
+async function generateCloudflareTurnIceServers(keyId: string, apiToken: string, ttl: number) {
+  const response = await fetch(
+    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ttl }),
+    },
+  );
+  const data = (await response.json().catch(() => ({}))) as CloudflareTurnResponse;
+  if (!response.ok) {
+    const message = data.errors?.map((error) => error.message).filter(Boolean).join("；");
+    throw new Error(message || `Cloudflare TURN 凭证生成失败：HTTP ${response.status}`);
   }
+
+  const iceServers = normalizeIceServers(data.iceServers);
+  if (iceServers.length === 0) {
+    throw new Error("Cloudflare 响应里没有可用的 iceServers。");
+  }
+  return iceServers;
 }
 
 function getStatsValue(stats: RTCStats, key: string) {
@@ -453,11 +707,13 @@ function getStatsValue(stats: RTCStats, key: string) {
 function formatCandidateStats(stats: RTCStats | undefined) {
   if (!stats) return "unknown";
   const candidateType = String(getStatsValue(stats, "candidateType") ?? "unknown");
-  const protocol = String(getStatsValue(stats, "protocol") ?? getStatsValue(stats, "relayProtocol") ?? "");
+  const protocol = String(getStatsValue(stats, "protocol") ?? "");
+  const relayProtocol = String(getStatsValue(stats, "relayProtocol") ?? "");
+  const protocolText = relayProtocol && relayProtocol !== protocol ? `${protocol || "?"} via ${relayProtocol}` : protocol;
   const address = String(getStatsValue(stats, "address") ?? getStatsValue(stats, "ip") ?? "?");
   const port = getStatsValue(stats, "port");
   const portText = typeof port === "number" || typeof port === "string" ? `:${port}` : "";
-  return `${candidateType} ${protocol ? `${protocol} ` : ""}${address}${portText}`;
+  return `${candidateType} ${protocolText ? `${protocolText} ` : ""}${address}${portText}`;
 }
 
 async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<SelectedCandidatePair> {
@@ -506,6 +762,7 @@ function waitForDataChannelOpen(
   channel: RTCDataChannel,
   peer: RTCPeerConnection,
   timeoutMs = channelOpenTimeoutMs,
+  onStatus?: (message: string) => void,
 ) {
   if (channel.readyState === "open") return Promise.resolve();
 
@@ -526,12 +783,17 @@ function waitForDataChannelOpen(
     const onOpen = () => done();
     const onClose = () => done(new Error("DataChannel 已关闭，连接没有建立。"));
     const onError = () => done(new Error("DataChannel 发生错误，连接没有建立。"));
+    const reportStatus = () => {
+      onStatus?.(`等待 DataChannel 打开：peer=${peer.connectionState}，ice=${peer.iceConnectionState}，gathering=${peer.iceGatheringState}，channel=${channel.readyState}`);
+    };
     const onIceState = () => {
+      reportStatus();
       if (peer.iceConnectionState === "failed" || peer.iceConnectionState === "closed") {
         done(new Error(`ICE 连接失败：${peer.iceConnectionState}。请确认发送方粘贴的是这次生成的 Answer。`));
       }
     };
     const onPeerState = () => {
+      reportStatus();
       if (peer.connectionState === "failed" || peer.connectionState === "closed") {
         done(new Error(`PeerConnection 连接失败：${peer.connectionState}。请重新生成并交换同一轮 Offer/Answer。`));
       }
@@ -548,21 +810,39 @@ function waitForDataChannelOpen(
     channel.addEventListener("error", onError);
     peer.addEventListener("iceconnectionstatechange", onIceState);
     peer.addEventListener("connectionstatechange", onPeerState);
+    reportStatus();
   });
 }
 
-function waitForBuffer(channel: RTCDataChannel) {
+function waitForBuffer(channel: RTCDataChannel, onWait?: () => void) {
+  if (channel.readyState !== "open") return Promise.reject(new Error("DataChannel 已关闭，发送已中断。"));
   if (channel.bufferedAmount <= highWaterMark) return Promise.resolve();
 
-  return new Promise<void>((resolve) => {
+  onWait?.();
+  return new Promise<void>((resolve, reject) => {
+    let finished = false;
     const previousThreshold = channel.bufferedAmountLowThreshold;
-    const onLow = () => {
+    const done = (error?: Error) => {
+      if (finished) return;
+      finished = true;
       channel.removeEventListener("bufferedamountlow", onLow);
+      channel.removeEventListener("close", onClose);
+      channel.removeEventListener("error", onError);
       channel.bufferedAmountLowThreshold = previousThreshold;
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
+    const onLow = () => {
+      if (channel.bufferedAmount <= lowWaterMark) done();
+    };
+    const onClose = () => done(new Error("DataChannel 已关闭，发送已中断。"));
+    const onError = () => done(new Error("DataChannel 发生错误，发送已中断。"));
+
     channel.bufferedAmountLowThreshold = lowWaterMark;
     channel.addEventListener("bufferedamountlow", onLow);
+    channel.addEventListener("close", onClose);
+    channel.addEventListener("error", onError);
+    onLow();
   });
 }
 
@@ -602,20 +882,59 @@ function TextArea({
   value,
   onChange,
   placeholder,
+  readOnly = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  readOnly?: boolean;
 }) {
   return (
     <label className="grid gap-2">
       <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
       <textarea
-        className="h-[clamp(88px,10.5dvh,118px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] bg-white px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px]"
+        className={`h-[clamp(88px,10.5dvh,118px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px] ${
+          readOnly ? "bg-[#f7fbff]" : "bg-white"
+        }`}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        readOnly={readOnly}
+        spellCheck={false}
+      />
+    </label>
+  );
+}
+
+function TextInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: "text" | "password" | "number";
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
+      <input
+        className="h-11 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[14px] font-semibold text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        type={type}
+        min={min}
+        max={max}
         spellCheck={false}
       />
     </label>
@@ -689,6 +1008,9 @@ function StatusMessage({
 
 export default function DirectPage({ variant = "direct" }: { variant?: TransferVariant }) {
   const config = transferVariantConfig[variant];
+  const protocolLabel = variant === "direct" ? "Direct" : variant.toUpperCase();
+  const signalPrefix = variant === "direct" ? "" : `${protocolLabel} `;
+  const usesIceServer = variant !== "direct";
   const senderPeerRef = useRef<RTCPeerConnection | null>(null);
   const receiverPeerRef = useRef<RTCPeerConnection | null>(null);
   const senderChannelRef = useRef<RTCDataChannel | null>(null);
@@ -696,6 +1018,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
   const receiveChunksRef = useRef<ArrayBuffer[]>([]);
   const receiveMetaRef = useRef<TransferMeta | null>(null);
   const receivedBytesRef = useRef(0);
+  const receiveProgressUpdateAtRef = useRef(0);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const sendInFlightRef = useRef(false);
   const stunProbeInFlightRef = useRef(false);
@@ -736,6 +1059,32 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
   const [stunProbeSummary, setStunProbeSummary] = useState<CandidateSummary>(emptyCandidateSummary);
   const [senderSelectedPair, setSenderSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
   const [receiverSelectedPair, setReceiverSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
+  const [turnKeyId, setTurnKeyId] = useState(defaultTurnKeyId);
+  const [turnApiToken, setTurnApiToken] = useState(defaultTurnApiToken);
+  const [turnTtl, setTurnTtl] = useState("3600");
+  const [turnIceServers, setTurnIceServers] = useState<RTCIceServer[]>([]);
+  const [turnTransport, setTurnTransport] = useState<TurnTransport>("udp");
+  const [turnProbeTransportSummary, setTurnProbeTransportSummary] = useState<TurnTransportSummary>(emptyTurnTransportSummary);
+  const [turnCredentialStatus, setTurnCredentialStatus] = useState("等待生成临时 TURN iceServers");
+  const [turnCredentialError, setTurnCredentialError] = useState("");
+  const [isGeneratingTurnCredentials, setIsGeneratingTurnCredentials] = useState(false);
+
+  const activeTurnIceServers = useMemo(
+    () => (variant === "turn" ? filterIceServersByTurnTransport(turnIceServers, turnTransport) : []),
+    [turnIceServers, turnTransport, variant],
+  );
+  const activeRtcConfig = useMemo<RTCConfiguration>(
+    () =>
+      variant === "turn"
+        ? { iceServers: activeTurnIceServers, iceTransportPolicy: "relay" }
+        : config.rtcConfig,
+    [activeTurnIceServers, config.rtcConfig, variant],
+  );
+  const serverLabel = variant === "turn" ? formatIceServerUrls(activeTurnIceServers) : config.serverLabel;
+  const hasTurnIceServers = variant !== "turn" || turnIceServers.length > 0;
+  const turnReady =
+    variant !== "turn" ||
+    (activeTurnIceServers.length > 0 && turnProbeTransportSummary[turnTransport] > 0);
 
   useEffect(() => {
     return () => {
@@ -751,27 +1100,31 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
 
   useEffect(() => {
     if (variant === "stun") {
-      void probeStunServer();
+      void probeIceServer();
     }
   }, []);
 
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
   const combinedCandidateSummary = mergeCandidateSummaries(senderCandidateSummary, receiverCandidateSummary);
-  const combinedStunSummary = mergeCandidateSummaries(stunProbeSummary, combinedCandidateSummary);
-  const stunStatus = formatStunStatus(combinedStunSummary, [
+  const combinedServerSummary = mergeCandidateSummaries(stunProbeSummary, combinedCandidateSummary);
+  const serverStatus = formatRelayServerStatus(protocolLabel, combinedServerSummary, [
     senderIceGatheringState,
     receiverIceGatheringState,
-  ]);
+  ], config.requiredCandidateTypes);
 
   const transferSteps: TransferStep[] =
-    variant === "stun"
+    usesIceServer
       ? [
           {
-            label: "STUN",
-            meta: combinedStunSummary.srflx > 0 ? "已发现 srflx" : isStunProbing ? "probe 中" : "等待发现",
+            label: protocolLabel,
+            meta: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes)
+              ? `已收集 ${formatRequiredCandidateTypes(config.requiredCandidateTypes)}`
+              : isStunProbing
+                ? "probe 中"
+                : "等待收集",
             icon: Server,
-            active: combinedStunSummary.srflx > 0,
+            active: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes),
           },
           {
             label: "信令",
@@ -821,20 +1174,23 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
 
   const details: DetailItem[] = [
     { label: "连接类型", value: config.connectionType, icon: Link2 },
-    ...(variant === "stun"
+    ...(usesIceServer
       ? [
           {
-            label: "STUN状态",
-            value: stunStatus,
+            label: `${protocolLabel}状态`,
+            value: serverStatus,
             icon: Server,
-            status: combinedStunSummary.srflx > 0 ? ("online" as const) : undefined,
+            status: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes) ? ("online" as const) : undefined,
           },
-          { label: "STUN服务器", value: config.serverLabel ?? "未配置", icon: Server },
+          { label: `${protocolLabel}服务器`, value: serverLabel ?? "未配置", icon: Server },
+          ...(variant === "turn"
+            ? [{ label: "TURN模式", value: turnTransport.toUpperCase(), icon: Gauge }]
+            : []),
           {
             label: "独立Probe",
             value: stunProbeError || `${stunProbeStatus}，${formatStoredCandidateSummary(stunProbeSummary)}`,
             icon: Gauge,
-            status: stunProbeSummary.srflx > 0 ? ("online" as const) : undefined,
+            status: hasRequiredCandidate(stunProbeSummary, config.requiredCandidateTypes) ? ("online" as const) : undefined,
           },
         ]
       : []),
@@ -852,7 +1208,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     },
     { label: "发送通道", value: senderChannelState, icon: Wifi },
     { label: "接收通道", value: receiverChannelState, icon: Wifi },
-    ...(variant === "stun"
+    ...(usesIceServer
       ? [
           { label: "本轮Offer候选", value: formatStoredCandidateSummary(senderCandidateSummary), icon: FileText },
           { label: "本轮Answer候选", value: formatStoredCandidateSummary(receiverCandidateSummary), icon: FileText },
@@ -868,9 +1224,9 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     { label: "进度", value: formatPercent(progress), icon: Gauge, progress },
   ];
 
-  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending;
+  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending && turnReady;
   const senderCanApplyAnswer = Boolean(senderAnswerInput.trim() && senderPeerRef.current);
-  const receiverCanCreateAnswer = Boolean(receiverOfferInput.trim());
+  const receiverCanCreateAnswer = Boolean(receiverOfferInput.trim()) && turnReady;
 
   const senderOfferSize = useMemo(() => (senderOffer ? `${senderOffer.length.toLocaleString()} 字符` : ""), [senderOffer]);
   const receiverAnswerSize = useMemo(() => (receiverAnswer ? `${receiverAnswer.length.toLocaleString()} 字符` : ""), [receiverAnswer]);
@@ -907,6 +1263,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     receiveChunksRef.current = [];
     receiveMetaRef.current = null;
     receivedBytesRef.current = 0;
+    receiveProgressUpdateAtRef.current = 0;
     setIncomingMeta(null);
     setReceiverPeerState("new");
     setReceiverIceState("new");
@@ -940,8 +1297,12 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     setReceivedBytes(0);
   }
 
-  async function probeStunServer() {
-    if (variant !== "stun" || stunProbeInFlightRef.current) return;
+  async function probeIceServer(nextRtcConfig = activeRtcConfig) {
+    if (!usesIceServer || stunProbeInFlightRef.current) return;
+    if (variant === "turn" && !nextRtcConfig.iceServers?.length) {
+      setStunProbeError("请先生成 Cloudflare TURN iceServers。");
+      return;
+    }
 
     try {
       stunProbeInFlightRef.current = true;
@@ -949,31 +1310,111 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       setStunProbeError("");
       setStunProbeStatus("步骤1 独立 probe 中");
       setStunProbeSummary(emptyCandidateSummary);
-      const summary = await runIceProbe(config.rtcConfig);
-      setStunProbeSummary(summary);
-      if (summary.srflx === 0) {
-        throw new Error(`Cloudflare STUN 没有返回 srflx。${formatStoredCandidateSummary(summary)}`);
+      if (variant === "turn") {
+        setTurnProbeTransportSummary(emptyTurnTransportSummary);
+        const readyTransports = new Set<TurnTransport>();
+        await Promise.allSettled(
+          turnTransports.map(async (transport) => {
+            const iceServers = filterIceServersByTurnTransport(nextRtcConfig.iceServers ?? [], transport);
+            if (iceServers.length === 0) return;
+
+            await observeIceProbe({
+              config: { iceServers, iceTransportPolicy: "relay" },
+              requiredTypes: config.requiredCandidateTypes,
+              timeoutMs: turnProbeGatheringTimeoutMs,
+              onSummary: (summary) => {
+                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
+                if (transport === turnTransport) setStunProbeSummary(summary);
+              },
+              onReady: (summary) => {
+                readyTransports.add(transport);
+                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
+                if (transport === turnTransport) setStunProbeSummary(summary);
+                setStunProbeStatus(`步骤1 probe 通过，${transport.toUpperCase()} 已有 relay，继续观察 ICE complete`);
+              },
+              onComplete: (summary) => {
+                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
+                if (transport === turnTransport) setStunProbeSummary(summary);
+                setStunProbeStatus("步骤1 probe complete");
+              },
+            });
+          }),
+        );
+
+        if (readyTransports.size === 0) {
+          throw new Error("UDP/TCP 都没有返回 relay。");
+        }
+        return;
       }
-      setStunProbeStatus("步骤1 probe 通过");
+
+      await observeIceProbe({
+        config: nextRtcConfig,
+        requiredTypes: config.requiredCandidateTypes,
+        timeoutMs: iceGatheringTimeoutMs,
+        onSummary: setStunProbeSummary,
+        onReady: (summary) => {
+          setStunProbeSummary(summary);
+          setStunProbeStatus(`步骤1 probe 通过，继续观察 ICE complete，当前 ${formatStoredCandidateSummary(summary)}`);
+        },
+        onComplete: (summary) => {
+          setStunProbeSummary(summary);
+          setStunProbeStatus(`步骤1 probe complete，最终 ${formatStoredCandidateSummary(summary)}`);
+        },
+      });
     } catch (error) {
       setStunProbeStatus("步骤1 probe 失败");
-      setStunProbeError(formatStepError(variant, "步骤1 独立 STUN probe 失败", error, "Cloudflare STUN probe 失败。"));
+      setStunProbeError(formatStepError(variant, `步骤1 独立 ${protocolLabel} probe 失败`, error, `${protocolLabel} probe 失败。`));
     } finally {
       stunProbeInFlightRef.current = false;
       setIsStunProbing(false);
     }
   }
 
+  async function generateTurnCredentials() {
+    if (variant !== "turn") return;
+    const keyId = turnKeyId.trim();
+    const apiToken = turnApiToken.trim();
+    const ttl = Number(turnTtl);
+
+    if (!keyId || !apiToken) {
+      setTurnCredentialError("请填写 Cloudflare TURN Key ID 和 API Token。");
+      return;
+    }
+    if (!Number.isInteger(ttl) || ttl < 60 || ttl > 86400) {
+      setTurnCredentialError("TTL 请填写 60 到 86400 秒之间的整数。");
+      return;
+    }
+
+    try {
+      setIsGeneratingTurnCredentials(true);
+      setTurnCredentialError("");
+      setTurnCredentialStatus("正在向 Cloudflare 生成临时 TURN iceServers...");
+      setStunProbeSummary(emptyCandidateSummary);
+      setTurnProbeTransportSummary(emptyTurnTransportSummary);
+      setStunProbeError("");
+      const iceServers = await generateCloudflareTurnIceServers(keyId, apiToken, ttl);
+      const nextRtcConfig: RTCConfiguration = { iceServers, iceTransportPolicy: "relay" };
+      setTurnIceServers(iceServers);
+      setTurnCredentialStatus(`已生成 ${iceServers.length} 组 TURN iceServers，TTL ${ttl} 秒。`);
+      await probeIceServer(nextRtcConfig);
+    } catch (error) {
+      setTurnCredentialStatus("TURN iceServers 不可用");
+      setTurnCredentialError(error instanceof Error ? error.message : "TURN iceServers 生成或 probe 失败。");
+    } finally {
+      setIsGeneratingTurnCredentials(false);
+    }
+  }
+
   async function updateSelectedCandidatePair(role: "sender" | "receiver", peer: RTCPeerConnection | null) {
-    if (variant !== "stun" || !peer) return;
+    if (!usesIceServer || !peer) return;
 
     try {
       const pair = await getSelectedCandidatePair(peer);
       if (role === "sender") setSenderSelectedPair(pair);
       else setReceiverSelectedPair(pair);
 
-      if (!pair.local.includes("srflx") && !pair.local.includes("relay") && !pair.remote.includes("srflx") && !pair.remote.includes("relay")) {
-        const message = "步骤3 最终 ICE candidate pair 不是 STUN 暴露的 srflx/relay 路径，请重新生成 STUN 信令。";
+      if (config.requiredCandidateTypes?.length && !config.requiredCandidateTypes.some((type) => pair.local.includes(type) || pair.remote.includes(type))) {
+        const message = `步骤3 最终 ICE candidate pair 不是 ${protocolLabel} ${formatRequiredCandidateTypes(config.requiredCandidateTypes)} 路径，请重新生成信令。`;
         if (role === "sender") setSenderError(message);
         else setReceiverError(message);
       }
@@ -989,7 +1430,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
     setSenderProgress(0);
     setSentBytes(0);
     if (file) {
-      setSenderStatus(`已选择 ${file.name}，可以生成 ${variant === "stun" ? "STUN " : ""}Offer。`);
+      setSenderStatus(`已选择 ${file.name}，可以生成 ${signalPrefix}Offer。`);
     }
   }
 
@@ -1044,6 +1485,10 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       setSenderError("请先选择一个文件。");
       return;
     }
+    if (!turnReady) {
+      setSenderError("请先生成 Cloudflare TURN iceServers。");
+      return;
+    }
 
     try {
       setSenderError("");
@@ -1056,18 +1501,76 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       closeSenderPeer();
 
       const peer = createPeerConnection(
-        config.rtcConfig,
+        activeRtcConfig,
         updateSenderPeerState,
         setSenderError,
-        variant === "stun" ? () => undefined : undefined,
+        usesIceServer ? () => undefined : undefined,
       );
-      const ice = collectIceCandidates(peer);
+      let onIceChange: (() => void) | undefined;
+      const ice = collectIceCandidates(peer, () => onIceChange?.());
       senderPeerRef.current = peer;
       attachSenderChannel(peer.createDataChannel("file-transfer", { ordered: true }));
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      await waitForIceGathering(peer);
+      if (variant === "turn") {
+        let signalVersion = 0;
+        const publishOfferSnapshot = async () => {
+          const description = peer.localDescription;
+          if (!description) return;
+
+          const version = ++signalVersion;
+          const signalParts = createSignalPayloadParts(
+            description.toJSON(),
+            ice.candidates,
+            config.signalCandidateTypes,
+            peer.iceGatheringState === "complete",
+          );
+          setSenderCandidateSummary(signalParts.summary);
+
+          if (!hasRequiredCandidate(signalParts.summary, config.requiredCandidateTypes)) {
+            const summary = formatStoredCandidateSummary(signalParts.summary);
+            const message = `步骤2 正在收集 ${formatRequiredCandidateTypes(config.requiredCandidateTypes)} 候选，当前 ${summary}。`;
+            if (peer.iceGatheringState === "complete") setSenderError(`${config.offerCandidateLabel} 没有收集到 relay 候选。`);
+            else setSenderStatus(message);
+            return;
+          }
+
+          const encoded = await encodeSignal({
+            kind: config.signalKind,
+            role: "offer",
+            description: signalParts.description,
+            candidates: signalParts.candidates,
+            createdAt: Date.now(),
+          });
+          if (version !== signalVersion || senderPeerRef.current !== peer) return;
+
+          setSenderOffer(encoded);
+          setSenderHandshakeStage("offer");
+          setSenderStatus(
+            peer.iceGatheringState === "complete"
+              ? `步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`
+              : `步骤2 ${config.offerCandidateLabel} 已更新，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。可复制，后续 relay 到达会继续刷新。`,
+          );
+        };
+        const onGatheringChange = () => {
+          void publishOfferSnapshot();
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", onGatheringChange);
+            ice.stop();
+          }
+        };
+        onIceChange = () => void publishOfferSnapshot();
+        peer.addEventListener("icegatheringstatechange", onGatheringChange);
+        void publishOfferSnapshot();
+        return;
+      }
+
+      await waitForIceGathering(
+        peer,
+        ice,
+        iceGatheringTimeoutMs,
+      );
       ice.stop();
 
       if (!peer.localDescription) {
@@ -1078,7 +1581,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         ice.candidates,
         config.signalCandidateTypes,
       );
-      assertHasCandidates(signalParts.description, signalParts.candidates, config.offerCandidateLabel, config.requireSrflx);
+      assertHasCandidates(signalParts.description, signalParts.candidates, config.offerCandidateLabel, config.requiredCandidateTypes);
       setSenderCandidateSummary(signalParts.summary);
 
       const encoded = await encodeSignal({
@@ -1092,11 +1595,16 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       setSenderHandshakeStage("offer");
       setSenderStatus(`步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`);
     } catch (error) {
-      setSenderError(formatStepError(variant, "步骤2 生成 STUN Offer 失败", error, "生成 Offer 失败。"));
+      setSenderError(formatStepError(variant, `步骤2 生成 ${config.offerCandidateLabel} 失败`, error, "生成 Offer 失败。"));
     }
   }
 
   async function createAnswerFromOffer() {
+    if (!turnReady) {
+      setReceiverError("请先生成 Cloudflare TURN iceServers。");
+      return;
+    }
+
     try {
       setReceiverError("");
       setReceiverStatus(config.answerGatheringStatus);
@@ -1114,20 +1622,21 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         throw new Error("粘贴的不是 Offer。");
       }
       if (payload.kind !== config.signalKind) {
-        throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Offer。请确认双方打开的是同一个页面。`);
+        throw new Error(`粘贴的不是 ${protocolLabel} Offer。请确认双方打开的是同一个页面。`);
       }
-      if (variant === "stun") {
-        assertUsableRemoteStunCandidates(payload, "发送方 STUN Offer");
+      if (usesIceServer) {
+        assertUsableRemoteCandidates(payload, `发送方 ${config.offerCandidateLabel}`, config.signalCandidateTypes);
       }
       setSenderCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
       const peer = createPeerConnection(
-        config.rtcConfig,
+        activeRtcConfig,
         updateReceiverPeerState,
         setReceiverError,
-        variant === "stun" ? () => undefined : undefined,
+        usesIceServer ? () => undefined : undefined,
       );
-      const ice = collectIceCandidates(peer);
+      let onIceChange: (() => void) | undefined;
+      const ice = collectIceCandidates(peer, () => onIceChange?.());
       receiverPeerRef.current = peer;
       peer.addEventListener("datachannel", (event) => attachReceiverChannel(event.channel));
 
@@ -1135,7 +1644,63 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       await addPayloadCandidates(peer, payload);
       const answer = await peer.createAnswer();
       await peer.setLocalDescription(answer);
-      await waitForIceGathering(peer);
+      if (variant === "turn") {
+        let signalVersion = 0;
+        const publishAnswerSnapshot = async () => {
+          const description = peer.localDescription;
+          if (!description) return;
+
+          const version = ++signalVersion;
+          const signalParts = createSignalPayloadParts(
+            description.toJSON(),
+            ice.candidates,
+            config.signalCandidateTypes,
+            peer.iceGatheringState === "complete",
+          );
+          setReceiverCandidateSummary(signalParts.summary);
+
+          if (!hasRequiredCandidate(signalParts.summary, config.requiredCandidateTypes)) {
+            const summary = formatStoredCandidateSummary(signalParts.summary);
+            const message = `步骤2 正在收集 ${formatRequiredCandidateTypes(config.requiredCandidateTypes)} 候选，当前 ${summary}。`;
+            if (peer.iceGatheringState === "complete") setReceiverError(`${config.answerCandidateLabel} 没有收集到 relay 候选。`);
+            else setReceiverStatus(message);
+            return;
+          }
+
+          const encoded = await encodeSignal({
+            kind: config.signalKind,
+            role: "answer",
+            description: signalParts.description,
+            candidates: signalParts.candidates,
+            createdAt: Date.now(),
+          });
+          if (version !== signalVersion || receiverPeerRef.current !== peer) return;
+
+          setReceiverAnswer(encoded);
+          setReceiverStatus(
+            peer.iceGatheringState === "complete"
+              ? `步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`
+              : `步骤2 ${config.answerCandidateLabel} 已更新，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。可复制，后续 relay 到达会继续刷新。`,
+          );
+        };
+        const onGatheringChange = () => {
+          void publishAnswerSnapshot();
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", onGatheringChange);
+            ice.stop();
+          }
+        };
+        onIceChange = () => void publishAnswerSnapshot();
+        peer.addEventListener("icegatheringstatechange", onGatheringChange);
+        void publishAnswerSnapshot();
+        return;
+      }
+
+      await waitForIceGathering(
+        peer,
+        ice,
+        iceGatheringTimeoutMs,
+      );
       ice.stop();
 
       if (!peer.localDescription) {
@@ -1146,7 +1711,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         ice.candidates,
         config.signalCandidateTypes,
       );
-      assertHasCandidates(signalParts.description, signalParts.candidates, config.answerCandidateLabel, config.requireSrflx);
+      assertHasCandidates(signalParts.description, signalParts.candidates, config.answerCandidateLabel, config.requiredCandidateTypes);
       setReceiverCandidateSummary(signalParts.summary);
 
       const encoded = await encodeSignal({
@@ -1159,7 +1724,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       setReceiverAnswer(encoded);
       setReceiverStatus(`步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`);
     } catch (error) {
-      setReceiverError(formatStepError(variant, "步骤2 生成 STUN Answer 失败", error, "生成 Answer 失败。"));
+      setReceiverError(formatStepError(variant, `步骤2 生成 ${config.answerCandidateLabel} 失败`, error, "生成 Answer 失败。"));
     }
   }
 
@@ -1176,14 +1741,14 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         throw new Error("粘贴的不是 Answer。");
       }
       if (payload.kind !== config.signalKind) {
-        throw new Error(`粘贴的不是 ${variant === "stun" ? "STUN" : "Direct"} Answer。请确认双方打开的是同一个页面。`);
+        throw new Error(`粘贴的不是 ${protocolLabel} Answer。请确认双方打开的是同一个页面。`);
       }
-      if (variant === "stun") {
-        assertUsableRemoteStunCandidates(payload, "接收方 STUN Answer");
+      if (usesIceServer) {
+        assertUsableRemoteCandidates(payload, `接收方 ${config.answerCandidateLabel}`, config.signalCandidateTypes);
       }
       setReceiverCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
-      setSenderStatus(variant === "stun" ? "步骤3 正在应用 STUN Answer，等待 DataChannel 打开..." : "正在应用 Answer，等待 DataChannel 打开...");
+      setSenderStatus(usesIceServer ? `步骤3 正在应用 ${config.answerCandidateLabel}，等待 DataChannel 打开...` : "正在应用 Answer，等待 DataChannel 打开...");
       await peer.setRemoteDescription(payload.description);
       await addPayloadCandidates(peer, payload);
       updateSenderPeerState(peer);
@@ -1191,11 +1756,16 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       if (!channel) {
         throw new Error("发送通道不存在，请重新生成 Offer。");
       }
-      await waitForDataChannelOpen(channel, peer);
+      await waitForDataChannelOpen(
+        channel,
+        peer,
+        variant === "turn" ? turnChannelOpenTimeoutMs : channelOpenTimeoutMs,
+        (message) => setSenderStatus(usesIceServer ? `步骤3 ${message}` : message),
+      );
       await updateSelectedCandidatePair("sender", peer);
       await sendSelectedFile();
     } catch (error) {
-      setSenderError(formatStepError(variant, "步骤3 建立 STUN 连接失败", error, "应用 Answer 失败。"));
+      setSenderError(formatStepError(variant, `步骤3 建立 ${protocolLabel} 连接失败`, error, "应用 Answer 失败。"));
     }
   }
 
@@ -1241,18 +1811,28 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       channel.send(JSON.stringify(meta));
 
       let offset = 0;
+      let lastProgressUpdateAt = 0;
+      const publishProgress = (bytes: number) => {
+        lastProgressUpdateAt = performance.now();
+        setSentBytes(bytes);
+        setSenderProgress(file.size ? (bytes / file.size) * 100 : 100);
+      };
+
       while (offset < file.size) {
         const buffer = await file.slice(offset, offset + chunkSize).arrayBuffer();
-        await waitForBuffer(channel);
+        await waitForBuffer(channel, () => publishProgress(offset));
         channel.send(buffer);
         offset += buffer.byteLength;
-        setSentBytes(offset);
-        setSenderProgress(file.size ? (offset / file.size) * 100 : 100);
+        const now = performance.now();
+        if (offset >= file.size || channel.bufferedAmount > highWaterMark || now - lastProgressUpdateAt >= progressUpdateIntervalMs) {
+          publishProgress(offset);
+        }
       }
 
       const done: TransferDone = { kind: "done" };
-      await waitForBuffer(channel);
+      await waitForBuffer(channel, () => publishProgress(offset));
       channel.send(JSON.stringify(done));
+      setSentBytes(file.size);
       setSenderProgress(100);
       setSenderStatus("文件已发送完成。");
     } catch (error) {
@@ -1277,6 +1857,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
         receiveMetaRef.current = message;
         receiveChunksRef.current = [];
         receivedBytesRef.current = 0;
+        receiveProgressUpdateAtRef.current = 0;
         setIncomingMeta(message);
         setReceivedBytes(0);
         setReceiverProgress(0);
@@ -1333,12 +1914,17 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
       receiveChunksRef.current = [];
       receiveMetaRef.current = null;
       receivedBytesRef.current = 0;
+      receiveProgressUpdateAtRef.current = 0;
       setIncomingMeta(null);
       return;
     }
 
-    setReceivedBytes(received);
-    setReceiverProgress(size ? (received / size) * 100 : 0);
+    const now = performance.now();
+    if (size === 0 || received >= size || now - receiveProgressUpdateAtRef.current >= progressUpdateIntervalMs) {
+      receiveProgressUpdateAtRef.current = now;
+      setReceivedBytes(received);
+      setReceiverProgress(size ? (received / size) * 100 : 0);
+    }
   }
 
   const senderConnected = senderChannelState === "open" || senderPeerState === "connected";
@@ -1477,27 +2063,80 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
               <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
             </div>
 
-            {variant === "stun" && (
+            {variant === "turn" && (
               <div className="mb-4 grid gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">步骤1 Cloudflare STUN Probe</h3>
+                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">Cloudflare TURN Credentials</h3>
+                    <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={turnCredentialError || turnCredentialStatus}>
+                      {turnCredentialError || turnCredentialStatus}
+                    </p>
+                  </div>
+                  <SecondaryButton onClick={() => void generateTurnCredentials()} disabled={isGeneratingTurnCredentials}>
+                    <Server aria-hidden="true" size={17} />
+                    生成
+                  </SecondaryButton>
+                </div>
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px] gap-3 max-[760px]:grid-cols-1">
+                  <TextInput label="Key ID" value={turnKeyId} onChange={setTurnKeyId} placeholder="Cloudflare TURN key id" />
+                  <TextInput label="API Token" value={turnApiToken} onChange={setTurnApiToken} placeholder="Bearer token" type="password" />
+                  <TextInput label="TTL 秒" value={turnTtl} onChange={setTurnTtl} type="number" min={60} max={86400} />
+                </div>
+              </div>
+            )}
+
+            {usesIceServer && (
+              <div className="mb-4 grid gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">步骤1 {protocolLabel} Probe</h3>
                     <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={stunProbeError || stunProbeStatus}>
                       {stunProbeError || stunProbeStatus}
                     </p>
                   </div>
-                  <SecondaryButton onClick={() => void probeStunServer()} disabled={isStunProbing}>
+                  <SecondaryButton onClick={() => void probeIceServer()} disabled={isStunProbing || !hasTurnIceServers}>
                     <Server aria-hidden="true" size={17} />
                     Probe
                   </SecondaryButton>
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-center text-[13px] max-[560px]:grid-cols-2">
-                  {(["host", "srflx", "relay", "total"] as const).map((key) => (
-                    <span className="rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
-                      <span className="block text-[#6a7f9e]">{key}</span>
-                      <strong className="text-[15px] text-[#142a4f]">{stunProbeSummary[key]}</strong>
-                    </span>
-                  ))}
+                <div className="grid grid-cols-3 gap-2 text-center text-[13px] max-[560px]:grid-cols-1">
+                  {variant === "turn"
+                    ? ([
+                        ["udp", "UDP", turnProbeTransportSummary.udp],
+                        ["tcp", "TCP", turnProbeTransportSummary.tcp],
+                        ["total", "Total", turnProbeTransportSummary.total],
+                      ] as const).map(([key, label, value]) => {
+                        const selectable = key !== "total";
+                        const selected = key === turnTransport;
+                        return (
+                          <button
+                            className={`rounded-lg border px-2 py-2 text-center transition ${
+                              selected
+                                ? "border-[#1677ff] bg-[#eaf4ff] text-[#0d63da] shadow-[0_8px_18px_rgba(47,125,246,0.12)]"
+                                : "border-[#dfeaf7] bg-white text-[#142a4f] hover:border-[#9ec7ff]"
+                            } ${selectable ? "" : "cursor-default hover:border-[#dfeaf7]"}`}
+                            disabled={!selectable}
+                            key={key}
+                            onClick={() => {
+                              if (!selectable || key === turnTransport) return;
+                              setTurnTransport(key);
+                              resetSender();
+                              resetReceiver();
+                              setTransferMode(null);
+                            }}
+                            type="button"
+                          >
+                            <span className="block text-[#6a7f9e]">{label}</span>
+                            <strong className="text-[15px]">{value}</strong>
+                          </button>
+                        );
+                      })
+                    : (["host", "srflx", "relay", "total"] as const).map((key) => (
+                        <span className="rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
+                          <span className="block text-[#6a7f9e]">{key}</span>
+                          <strong className="text-[15px] text-[#142a4f]">{stunProbeSummary[key]}</strong>
+                        </span>
+                      ))}
                 </div>
               </div>
             )}
@@ -1507,13 +2146,13 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
                 <RoleOption
                   mode="send"
                   title="发送文件"
-                  description={`生成 ${variant === "stun" ? "STUN " : ""}Offer，等待接收方 Answer`}
+                  description={`生成 ${signalPrefix}Offer，等待接收方 Answer`}
                   icon={UploadCloud}
                 />
                 <RoleOption
                   mode="receive"
                   title="接收文件"
-                  description={`粘贴 ${variant === "stun" ? "STUN " : ""}Offer，生成 Answer`}
+                  description={`粘贴 ${signalPrefix}Offer，生成 Answer`}
                   icon={Download}
                 />
               </div>
@@ -1528,7 +2167,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
                   <h3 className="mt-3 text-[20px] font-extrabold text-[#061b3a]">已连接</h3>
                   <p className="mt-1 text-[14px] text-[#526c92]">
                     {transferMode === "send"
-                      ? `${variant === "stun" ? "STUN " : ""}Answer 已应用，文件会通过 DataChannel 发送。`
+                      ? `${signalPrefix}Answer 已应用，文件会通过 DataChannel 发送。`
                       : "接收通道已打开，等待发送方传输文件。"}
                   </p>
                 </div>
@@ -1553,34 +2192,35 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
                 {senderHandshakeStage === "offer" ? (
                   <>
                     <TextArea
-                      label={`发送方 ${variant === "stun" ? "STUN " : ""}Offer ${senderOfferSize}`}
+                      label={`发送方 ${signalPrefix}Offer ${senderOfferSize}`}
                       value={senderOffer}
                       onChange={setSenderOffer}
-                      placeholder={`选择文件并生成 ${variant === "stun" ? "STUN " : ""}Offer 后，把这一整串文本复制给接收方`}
+                      placeholder={`选择文件并生成 ${signalPrefix}Offer 后，把这一整串文本复制给接收方`}
+                      readOnly
                     />
                     <div className="flex flex-wrap gap-3">
                       <PrimaryButton onClick={generateOffer} disabled={!senderCanGenerateOffer}>
                         <Send aria-hidden="true" size={17} />
-                        生成 {variant === "stun" ? "STUN " : ""}Offer
+                        生成 {signalPrefix}Offer
                       </PrimaryButton>
                       <SecondaryButton onClick={() => void copySenderOffer()} disabled={!senderOffer}>
                         <Copy aria-hidden="true" size={17} />
-                        复制 {variant === "stun" ? "STUN " : ""}Offer
+                        复制 {signalPrefix}Offer
                       </SecondaryButton>
                     </div>
                   </>
                 ) : (
                   <>
                     <TextArea
-                      label={`接收方 ${variant === "stun" ? "STUN " : ""}Answer`}
+                      label={`接收方 ${signalPrefix}Answer`}
                       value={senderAnswerInput}
                       onChange={setSenderAnswerInput}
-                      placeholder={`把接收方生成的 ${variant === "stun" ? "STUN " : ""}Answer 粘贴到这里`}
+                      placeholder={`把接收方生成的 ${signalPrefix}Answer 粘贴到这里`}
                     />
                     <div className="flex flex-wrap gap-3">
                       <SecondaryButton onClick={() => setSenderHandshakeStage("offer")}>
                         <FileText aria-hidden="true" size={17} />
-                        查看 {variant === "stun" ? "STUN " : ""}Offer
+                        查看 {signalPrefix}Offer
                       </SecondaryButton>
                       <PrimaryButton onClick={applyAnswerToSender} disabled={!senderCanApplyAnswer}>
                         <Link2 aria-hidden="true" size={17} />
@@ -1598,34 +2238,35 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
                 {receiverAnswer ? (
                   <>
                     <TextArea
-                      label={`接收方 ${variant === "stun" ? "STUN " : ""}Answer ${receiverAnswerSize}`}
+                      label={`接收方 ${signalPrefix}Answer ${receiverAnswerSize}`}
                       value={receiverAnswer}
                       onChange={setReceiverAnswer}
                       placeholder="生成后复制这一整串文本给发送方"
+                      readOnly
                     />
                     <div className="flex flex-wrap gap-3">
                       <SecondaryButton onClick={() => setReceiverAnswer("")}>
                         <FileText aria-hidden="true" size={17} />
-                        修改 {variant === "stun" ? "STUN " : ""}Offer
+                        修改 {signalPrefix}Offer
                       </SecondaryButton>
                       <PrimaryButton onClick={() => void copyReceiverAnswer()} disabled={!receiverAnswer}>
                         <Copy aria-hidden="true" size={17} />
-                        复制 {variant === "stun" ? "STUN " : ""}Answer
+                        复制 {signalPrefix}Answer
                       </PrimaryButton>
                     </div>
                   </>
                 ) : (
                   <>
                     <TextArea
-                      label={`发送方 ${variant === "stun" ? "STUN " : ""}Offer`}
+                      label={`发送方 ${signalPrefix}Offer`}
                       value={receiverOfferInput}
                       onChange={setReceiverOfferInput}
-                      placeholder={`把发送方 ${variant === "stun" ? "STUN " : ""}Offer 粘贴到这里`}
+                      placeholder={`把发送方 ${signalPrefix}Offer 粘贴到这里`}
                     />
                     <div className="flex flex-wrap gap-3">
                       <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
                         <Link2 aria-hidden="true" size={17} />
-                        生成 {variant === "stun" ? "STUN " : ""}Answer
+                        生成 {signalPrefix}Answer
                       </PrimaryButton>
                     </div>
                   </>
@@ -1653,7 +2294,7 @@ export default function DirectPage({ variant = "direct" }: { variant?: TransferV
                 {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
               <span className="mt-1 text-[14px] text-[#526c92]">
-                {selectedFile ? formatBytes(selectedFile.size) : `选择发送文件后再生成 ${variant === "stun" ? "STUN " : ""}Offer`}
+                {selectedFile ? formatBytes(selectedFile.size) : `选择发送文件后再生成 ${signalPrefix}Offer`}
               </span>
               <div className="mt-5 flex flex-wrap justify-center gap-3">
                 <PrimaryButton onClick={() => senderFileInputRef.current?.click()}>

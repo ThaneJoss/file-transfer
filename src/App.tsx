@@ -5,6 +5,7 @@ import type { AppRoute, AppRouteId } from "./components/AppShell";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import DirectPage from "./pages/DirectPage";
 import StunPage from "./pages/StunPage";
+import TurnPage from "./pages/TurnPage";
 
 function routeFromPath(pathname: string): AppRoute {
   if (pathname === "/") return routes[0];
@@ -32,7 +33,7 @@ export default function App() {
       case "stun":
         return <StunPage />;
       case "turn":
-        return <ComingSoonPage title="TURN" />;
+        return <TurnPage />;
       case "sfu":
         return <ComingSoonPage title="SFU" />;
       case "r2":
