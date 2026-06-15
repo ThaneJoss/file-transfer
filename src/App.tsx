@@ -387,7 +387,7 @@ function TextArea({
     <label className="grid gap-2">
       <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
       <textarea
-        className="min-h-[132px] resize-y rounded-xl border border-[#d7e5f6] bg-white px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10"
+        className="h-[clamp(96px,12.5dvh,132px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] bg-white px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[132px] max-[560px]:h-[120px]"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -410,7 +410,7 @@ function PrimaryButton({
 }) {
   return (
     <button
-      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#1677ff] px-5 text-[15px] font-extrabold text-white shadow-[0_12px_22px_rgba(47,125,246,0.22)] transition hover:-translate-y-px hover:bg-[#0d63da] disabled:cursor-not-allowed disabled:bg-[#a9bdd8] disabled:shadow-none disabled:hover:translate-y-0"
+      className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#1677ff] px-5 text-[15px] font-extrabold text-white shadow-[0_12px_22px_rgba(47,125,246,0.22)] transition hover:-translate-y-px hover:bg-[#0d63da] disabled:cursor-not-allowed disabled:bg-[#a9bdd8] disabled:shadow-none disabled:hover:translate-y-0"
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -431,7 +431,7 @@ function SecondaryButton({
 }) {
   return (
     <button
-      className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-4 text-[15px] font-extrabold text-[#17345f] transition hover:-translate-y-px hover:border-[#9ec7ff] disabled:cursor-not-allowed disabled:text-[#98a9c0] disabled:hover:translate-y-0"
+      className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d7e5f6] bg-white px-4 text-[15px] font-extrabold text-[#17345f] transition hover:-translate-y-px hover:border-[#9ec7ff] disabled:cursor-not-allowed disabled:text-[#98a9c0] disabled:hover:translate-y-0"
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -943,8 +943,8 @@ export default function App() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-[min(1680px,calc(100vw_-_clamp(28px,4vw,72px)))] flex-col py-[clamp(18px,2.5vw,34px)]">
-      <header className="mb-[clamp(18px,2.2vw,28px)] grid grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(160px,260px)] items-center gap-4 max-[1040px]:grid-cols-1 max-[1040px]:justify-items-center">
+    <main className="mx-auto flex h-dvh w-[min(1680px,calc(100vw_-_clamp(28px,4vw,72px)))] flex-col overflow-hidden py-[clamp(14px,1.8vw,24px)] max-[1180px]:h-auto max-[1180px]:min-h-dvh max-[1180px]:overflow-visible max-[1180px]:py-[clamp(18px,2.5vw,34px)]">
+      <header className="mb-[clamp(12px,1.5vw,20px)] grid shrink-0 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(160px,260px)] items-center gap-4 max-[1040px]:grid-cols-1 max-[1040px]:justify-items-center">
         <a
           className="inline-flex w-fit items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
           href="/"
@@ -976,9 +976,9 @@ export default function App() {
         </nav>
       </header>
 
-      <div className="grid flex-1 grid-cols-[minmax(360px,1fr)_minmax(0,1.8fr)] gap-[clamp(14px,1.5vw,22px)] max-[1180px]:grid-cols-1">
-        <Panel className="row-span-2 p-[clamp(18px,1.8vw,28px)] max-[1180px]:row-span-1">
-          <div className="mb-7 flex items-start justify-between gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[minmax(0,1fr)_minmax(0,0.5fr)] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]">
+        <Panel className="row-span-2 flex min-h-0 flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:row-span-1 max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+          <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
             <div>
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
               <p className="mt-1 text-[15px] text-[#526c92]">手动复制 Offer / Answer，文件走 DataChannel 点对点传输。</p>
@@ -995,7 +995,7 @@ export default function App() {
             </SecondaryButton>
           </div>
 
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)] items-start gap-2 max-[620px]:grid-cols-1 max-[620px]:gap-5">
+          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)] items-start gap-2 max-[620px]:grid-cols-1 max-[620px]:gap-5">
             {transferSteps.map((step, index) => {
               const Icon = step.icon;
               return (
@@ -1023,10 +1023,10 @@ export default function App() {
             })}
           </div>
 
-          <div className="my-7 h-px bg-[#e3edf9]" />
+          <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
 
-          <h2 className="mb-4 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-          <div className="grid gap-0">
+          <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
+          <div className="grid min-h-0 gap-0 overflow-auto pr-1">
             {details.map((item) => {
               const Icon = item.icon;
               return (
@@ -1035,7 +1035,7 @@ export default function App() {
                   key={item.label}
                 >
                   <Icon aria-hidden="true" className="text-[#526c92]" size={18} />
-                  <span className="text-[#526c92]">{item.label}</span>
+                  <span className="whitespace-nowrap text-[#526c92] max-[560px]:whitespace-normal">{item.label}</span>
                   {item.progress == null ? (
                     <span className="min-w-0 justify-self-end break-words text-right font-medium text-[#142a4f] max-[560px]:col-span-2 max-[560px]:justify-self-start max-[560px]:text-left">
                       {item.status === "online" && <span className="mr-2 inline-block size-2.5 rounded-full bg-[#1dc85f]" />}
@@ -1055,9 +1055,9 @@ export default function App() {
           </div>
         </Panel>
 
-        <div className="grid grid-cols-2 gap-[clamp(14px,1.5vw,22px)] max-[980px]:grid-cols-1">
-          <Panel className="p-[clamp(18px,1.8vw,28px)]">
-            <div className="mb-5">
+        <div className="grid min-h-0 grid-cols-2 gap-[clamp(12px,1.2vw,18px)] max-[980px]:grid-cols-1 max-[980px]:gap-[clamp(14px,1.5vw,22px)]">
+          <Panel className="min-h-0 overflow-auto p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+            <div className="mb-4">
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
               <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
             </div>
@@ -1154,22 +1154,22 @@ export default function App() {
             )}
           </Panel>
 
-          <Panel className="p-[clamp(18px,1.8vw,28px)]">
+          <Panel className="min-h-0 overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
             <div
-              className="grid min-h-[300px] place-items-center rounded-2xl border-2 border-dashed border-[#bdd3f1] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(244,249,255,0.78))] px-5 py-7 text-center"
+              className="grid h-full min-h-[220px] place-items-center rounded-2xl border-2 border-dashed border-[#bdd3f1] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(244,249,255,0.78))] px-5 py-5 text-center max-[1180px]:min-h-[300px] max-[1180px]:py-7"
               onDrop={handleDrop}
               onDragOver={(event) => event.preventDefault()}
               aria-label="选择发送文件"
             >
               <input ref={senderFileInputRef} className="hidden" type="file" onChange={handleFileInput} />
-              <div className="mb-5 grid size-[82px] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)]">
+              <div className="mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px]">
                 <UploadCloud aria-hidden="true" size={46} />
               </div>
               <strong className="max-w-full break-words text-[20px] font-extrabold text-[#071b3a]">
                 {selectedFile ? selectedFile.name : "点击或拖拽文件到此处上传"}
               </strong>
               <span className="mt-1 text-[14px] text-[#526c92]">{selectedFile ? formatBytes(selectedFile.size) : "选择发送文件后再生成 Offer"}</span>
-              <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
                 <PrimaryButton onClick={() => senderFileInputRef.current?.click()}>
                   <HardDrive aria-hidden="true" size={17} />
                   选择文件
@@ -1179,15 +1179,15 @@ export default function App() {
           </Panel>
         </div>
 
-        <Panel className="p-[clamp(18px,1.8vw,28px)]">
-          <div className="mb-6 flex items-center justify-between gap-4 max-[560px]:items-start max-[560px]:flex-col">
+        <Panel className="flex min-h-0 flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+          <div className="mb-4 flex shrink-0 items-center justify-between gap-4 max-[560px]:items-start max-[560px]:flex-col">
             <h2 className="m-0 text-[26px] font-extrabold text-[#061b3a]">已接收文件</h2>
             <span className="rounded-lg border border-[#d7e5f6] bg-white px-4 py-2 text-[15px] font-medium text-[#526c92]">
               {receivedFiles.length} 个文件
             </span>
           </div>
 
-          <div className="grid gap-3" role="table" aria-label="已接收文件列表">
+          <div className="grid min-h-0 gap-3 overflow-auto pr-1" role="table" aria-label="已接收文件列表">
             {receivedFiles.length === 0 ? (
               <div className="grid min-h-[108px] place-items-center rounded-xl border border-dashed border-[#c7daf2] bg-white/70 text-[15px] text-[#607a9f]">
                 接收完成后，文件会出现在这里并自动触发下载。
