@@ -371,7 +371,7 @@ function TextArea({
     <label className="grid gap-2">
       <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
       <textarea
-        className="h-[clamp(96px,12.5dvh,132px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] bg-white px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[132px] max-[560px]:h-[120px]"
+        className="h-[clamp(88px,10.5dvh,118px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] bg-white px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px]"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -927,7 +927,7 @@ export default function DirectPage() {
   }
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[minmax(0,1fr)_minmax(0,0.5fr)] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]">
+    <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[auto_minmax(180px,0.5fr)] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]">
         <Panel className="row-span-2 flex min-h-0 flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:row-span-1 max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
           <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
             <div>
@@ -1007,7 +1007,7 @@ export default function DirectPage() {
         </Panel>
 
         <div className="grid min-h-0 grid-cols-2 gap-[clamp(12px,1.2vw,18px)] max-[980px]:grid-cols-1 max-[980px]:gap-[clamp(14px,1.5vw,22px)]">
-          <Panel className="min-h-0 overflow-auto p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+          <Panel className="min-h-0 overflow-visible p-[clamp(16px,1.45vw,22px)] max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
             <div className="mb-4">
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
               <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>

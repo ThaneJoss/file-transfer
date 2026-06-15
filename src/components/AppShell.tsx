@@ -27,7 +27,7 @@ export function AppShell({
   onNavigate: (route: AppRoute) => void;
 }) {
   return (
-    <main className="mx-auto flex h-dvh w-[min(1680px,calc(100vw_-_clamp(28px,4vw,72px)))] flex-col overflow-hidden py-[clamp(14px,1.8vw,24px)] max-[1180px]:h-auto max-[1180px]:min-h-dvh max-[1180px]:overflow-visible max-[1180px]:py-[clamp(18px,2.5vw,34px)]">
+    <main className="mx-auto flex min-h-dvh w-[min(1680px,calc(100vw_-_clamp(28px,4vw,72px)))] flex-col overflow-visible py-[clamp(14px,1.8vw,24px)] max-[1180px]:py-[clamp(18px,2.5vw,34px)]">
       <header className="mb-[clamp(12px,1.5vw,20px)] grid shrink-0 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(160px,260px)] items-center gap-4 max-[1040px]:grid-cols-1 max-[1040px]:justify-items-center">
         <a
           className="inline-flex w-fit items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
