@@ -434,6 +434,7 @@ export default function DirectPage() {
   const receiveMetaRef = useRef<TransferMeta | null>(null);
   const receivedBytesRef = useRef(0);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
+  const sendInFlightRef = useRef(false);
   const senderFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -505,7 +506,7 @@ export default function DirectPage() {
   ];
 
   const details: DetailItem[] = [
-    { label: "连接类型", value: "Direct WebRTC DataChannel", icon: Link2 },
+    { label: "连接类型", value: "Direct DataChannel", icon: Link2 },
     {
       label: "发送端状态",
       value: `${senderPeerState} / ${senderIceState}`,
@@ -577,6 +578,7 @@ export default function DirectPage() {
     setSenderProgress(0);
     setSentBytes(0);
     setIsSending(false);
+    sendInFlightRef.current = false;
     setSenderHandshakeStage("offer");
   }
 
@@ -613,8 +615,7 @@ export default function DirectPage() {
     channel.binaryType = "arraybuffer";
     channel.addEventListener("open", () => {
       setSenderChannelState(channel.readyState);
-      setSenderStatus("DataChannel 已打开，开始发送文件。");
-      void sendSelectedFile();
+      setSenderStatus("DataChannel 已打开，准备发送文件。");
     });
     channel.addEventListener("close", () => {
       setSenderChannelState(channel.readyState);
@@ -787,8 +788,9 @@ export default function DirectPage() {
   async function sendSelectedFile() {
     const file = selectedFile;
     const channel = senderChannelRef.current;
-    if (!file || !channel || channel.readyState !== "open" || isSending || senderProgress >= 100) return;
+    if (!file || !channel || channel.readyState !== "open" || isSending || sendInFlightRef.current || senderProgress >= 100) return;
 
+    sendInFlightRef.current = true;
     try {
       setIsSending(true);
       setSenderError("");
@@ -823,6 +825,7 @@ export default function DirectPage() {
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "发送文件失败。");
     } finally {
+      sendInFlightRef.current = false;
       setIsSending(false);
     }
   }
@@ -878,11 +881,29 @@ export default function DirectPage() {
       return;
     }
 
+    const meta = receiveMetaRef.current;
+    if (!meta) {
+      setReceiverError("收到文件数据，但缺少文件元数据。请重新传输。");
+      return;
+    }
+
     const buffer = data instanceof ArrayBuffer ? data : await (data as Blob).arrayBuffer();
     receiveChunksRef.current.push(buffer);
     receivedBytesRef.current += buffer.byteLength;
     const received = receivedBytesRef.current;
-    const size = receiveMetaRef.current?.size ?? 0;
+    const size = meta.size;
+    if (size > 0 && received > size) {
+      setReceivedBytes(received);
+      setReceiverProgress(100);
+      setReceiverError(`接收数据超过声明大小：已接收 ${formatBytes(received)}，文件大小 ${formatBytes(size)}。请重新传输。`);
+      setReceiverStatus("接收数据异常，已停止保存这个文件。");
+      receiveChunksRef.current = [];
+      receiveMetaRef.current = null;
+      receivedBytesRef.current = 0;
+      setIncomingMeta(null);
+      return;
+    }
+
     setReceivedBytes(received);
     setReceiverProgress(size ? (received / size) * 100 : 0);
   }
@@ -946,12 +967,19 @@ export default function DirectPage() {
             </SecondaryButton>
           </div>
 
-          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)_minmax(22px,40px)_minmax(0,1fr)] items-start gap-2 max-[620px]:grid-cols-1 max-[620px]:gap-5">
-            {transferSteps.map((step, index) => {
+          <div className="relative grid shrink-0 grid-cols-4 items-start max-[620px]:grid-cols-1 max-[620px]:gap-5">
+            <div className="absolute left-[12.5%] right-[12.5%] top-[26px] grid grid-cols-3 max-[620px]:hidden">
+              {transferSteps.slice(0, -1).map((step) => (
+                <span
+                  className={`mx-7 h-[3px] rounded-full ${step.active ? "bg-[#1677ff]" : "bg-[#cdd8e7]"}`}
+                  key={`connector-${step.label}`}
+                />
+              ))}
+            </div>
+            {transferSteps.map((step) => {
               const Icon = step.icon;
               return (
-                <div className="contents max-[620px]:block" key={step.label}>
-                  <div className="grid justify-items-center text-center max-[620px]:grid-cols-[56px_1fr] max-[620px]:justify-items-start max-[620px]:gap-3 max-[620px]:text-left">
+                <div className="relative z-10 grid min-w-0 justify-items-center text-center max-[620px]:grid-cols-[56px_1fr] max-[620px]:justify-items-start max-[620px]:gap-3 max-[620px]:text-left" key={step.label}>
                     <span
                       className={`grid size-[54px] place-items-center rounded-2xl text-white shadow-[0_10px_25px_rgba(47,125,246,0.25)] ${
                         step.active ? "bg-[#1677ff]" : "bg-[#aeb8c8]"
@@ -959,16 +987,12 @@ export default function DirectPage() {
                     >
                       <Icon aria-hidden="true" size={25} />
                     </span>
-                    <div>
-                      <strong className="mt-4 block text-[15px] font-extrabold text-[#071b3a] max-[620px]:mt-1">
+                    <div className="min-w-0">
+                      <strong className="mt-4 block truncate text-[15px] font-extrabold text-[#071b3a] max-[620px]:mt-1">
                         {step.label}
                       </strong>
-                      <span className="mt-2 block text-sm text-[#667a9a] max-[620px]:mt-0">{step.meta}</span>
+                      <span className="mt-2 block truncate text-sm text-[#667a9a] max-[620px]:mt-0">{step.meta}</span>
                     </div>
-                  </div>
-                  {index < transferSteps.length - 1 && (
-                    <span className={`mt-[25px] h-[3px] rounded-full max-[620px]:hidden ${step.active ? "bg-[#1677ff]" : "bg-[#cdd8e7]"}`} />
-                  )}
                 </div>
               );
             })}
@@ -977,27 +1001,34 @@ export default function DirectPage() {
           <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
 
           <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-          <div className="grid min-h-0 gap-0 overflow-auto pr-1">
+          <div className="grid shrink-0 grid-cols-2 gap-2.5 max-[560px]:grid-cols-1">
             {details.map((item) => {
               const Icon = item.icon;
               return (
                 <div
-                  className="grid min-h-[38px] grid-cols-[24px_minmax(0,1fr)_minmax(0,max-content)] items-center gap-3 border-b border-[#e5edf8] text-[15px] last:border-b-0 max-[560px]:grid-cols-[24px_1fr] max-[560px]:py-2"
+                  className="grid min-h-[62px] grid-cols-[30px_minmax(0,1fr)] items-center gap-2.5 rounded-xl border border-[#dfeaf7] bg-white/65 px-3 py-2.5 text-[13px] shadow-[0_6px_16px_rgba(16,34,59,0.025)]"
                   key={item.label}
                 >
-                  <Icon aria-hidden="true" className="text-[#526c92]" size={18} />
-                  <span className="whitespace-nowrap text-[#526c92] max-[560px]:whitespace-normal">{item.label}</span>
+                  <span className="grid size-[30px] place-items-center rounded-lg bg-[#eef6ff] text-[#1677ff]">
+                    <Icon aria-hidden="true" size={16} />
+                  </span>
                   {item.progress == null ? (
-                    <span className="min-w-0 justify-self-end break-words text-right font-medium text-[#142a4f] max-[560px]:col-span-2 max-[560px]:justify-self-start max-[560px]:text-left">
-                      {item.status === "online" && <span className="mr-2 inline-block size-2.5 rounded-full bg-[#1dc85f]" />}
-                      {item.value}
+                    <span className="min-w-0">
+                      <span className="block whitespace-nowrap text-[#6a7f9e]">{item.label}</span>
+                      <strong className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[14px] font-extrabold text-[#142a4f]">
+                        {item.status === "online" && <span className="inline-block size-2 shrink-0 rounded-full bg-[#1dc85f]" />}
+                        <span className="min-w-0 truncate">{item.value}</span>
+                      </strong>
                     </span>
                   ) : (
-                    <span className="grid w-[min(420px,42vw)] max-w-full grid-cols-[minmax(0,1fr)_58px] items-center gap-5 max-[1180px]:w-[min(420px,70vw)] max-[560px]:col-span-2 max-[560px]:w-full">
-                      <span className="h-1 rounded-full bg-[#cdd8e7]">
+                    <span className="grid min-w-0 gap-1.5">
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="whitespace-nowrap text-[#6a7f9e]">{item.label}</span>
+                        <strong className="text-[14px] font-extrabold text-[#142a4f]">{item.value}</strong>
+                      </span>
+                      <span className="h-1.5 rounded-full bg-[#dce8f7]">
                         <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${item.progress}%` }} />
                       </span>
-                      <span className="text-right font-medium text-[#142a4f]">{item.value}</span>
                     </span>
                   )}
                 </div>
@@ -1021,25 +1052,25 @@ export default function DirectPage() {
             )}
 
             {transferMode && activeConnected && (
-              <div className="grid min-h-[260px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] px-5 py-7 text-center">
-                <span className="grid size-[68px] place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_14px_30px_rgba(47,125,246,0.24)]">
-                  <Check aria-hidden="true" size={34} />
+              <div className="grid min-h-[220px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] px-5 py-5 text-center">
+                <span className="grid size-[56px] place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_14px_30px_rgba(47,125,246,0.24)]">
+                  <Check aria-hidden="true" size={29} />
                 </span>
                 <div>
-                  <h3 className="mt-5 text-[21px] font-extrabold text-[#061b3a]">已连接</h3>
-                  <p className="mt-2 text-[15px] text-[#526c92]">
+                  <h3 className="mt-3 text-[20px] font-extrabold text-[#061b3a]">已连接</h3>
+                  <p className="mt-1 text-[14px] text-[#526c92]">
                     {transferMode === "send" ? "Answer 已应用，文件会通过 DataChannel 发送。" : "接收通道已打开，等待发送方传输文件。"}
                   </p>
                 </div>
-                <div className="mt-5 w-full rounded-xl border border-[#d7e5f6] bg-white px-4 py-4 text-left">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="text-[17px] font-extrabold text-[#071b3a]">{transferMode === "send" ? "发送进度" : "接收进度"}</h3>
+                <div className="mt-4 w-full rounded-xl border border-[#d7e5f6] bg-white px-4 py-3 text-left">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
+                    <h3 className="text-[16px] font-extrabold text-[#071b3a]">{transferMode === "send" ? "发送进度" : "接收进度"}</h3>
                     <span className="text-[14px] font-medium text-[#526c92]">{formatPercent(transferMode === "send" ? senderProgress : receiverProgress)}</span>
                   </div>
                   <div className="h-2 rounded-full bg-[#dce8f7]">
                     <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${transferMode === "send" ? senderProgress : receiverProgress}%` }} />
                   </div>
-                  <div className="mt-3 flex justify-between gap-3 text-[14px] text-[#526c92]">
+                  <div className="mt-2.5 flex justify-between gap-3 text-[14px] text-[#526c92]">
                     <span>{transferMode === "send" ? formatBytes(sentBytes) : formatBytes(receivedBytes)}</span>
                     <span>{formatBytes(totalBytes)}</span>
                   </div>
@@ -1138,7 +1169,11 @@ export default function DirectPage() {
             </span>
           </div>
 
-          <div className="grid min-h-0 gap-3 overflow-auto pr-1" role="table" aria-label="已接收文件列表">
+          <div
+            className={`grid min-h-0 gap-3 ${receivedFiles.length > 0 ? "overflow-auto pr-1" : "overflow-hidden"}`}
+            role="table"
+            aria-label="已接收文件列表"
+          >
             {receivedFiles.length === 0 ? (
               <div className="grid min-h-[108px] place-items-center rounded-xl border border-dashed border-[#c7daf2] bg-white/70 text-[15px] text-[#607a9f]">
                 接收完成后，文件会出现在这里并自动触发下载。
