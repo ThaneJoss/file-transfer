@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell, routes } from "./components/AppShell";
 import type { AppRoute, AppRouteId } from "./components/AppShell";
-import { ComingSoonPage } from "./pages/ComingSoonPage";
 import DirectPage from "./pages/DirectPage";
+import R2Page from "./pages/R2Page";
 import SfuPage from "./pages/SfuPage";
 import StunPage from "./pages/StunPage";
 import TurnPage from "./pages/TurnPage";
@@ -38,7 +38,7 @@ export default function App() {
       case "sfu":
         return <SfuPage />;
       case "r2":
-        return <ComingSoonPage title="R2" />;
+        return <R2Page />;
       case "direct":
       default:
         return <DirectPage />;
