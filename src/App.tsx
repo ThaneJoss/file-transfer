@@ -4,6 +4,7 @@ import { AppShell, routes } from "./components/AppShell";
 import type { AppRoute, AppRouteId } from "./components/AppShell";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 import DirectPage from "./pages/DirectPage";
+import SfuPage from "./pages/SfuPage";
 import StunPage from "./pages/StunPage";
 import TurnPage from "./pages/TurnPage";
 
@@ -35,7 +36,7 @@ export default function App() {
       case "turn":
         return <TurnPage />;
       case "sfu":
-        return <ComingSoonPage title="SFU" />;
+        return <SfuPage />;
       case "r2":
         return <ComingSoonPage title="R2" />;
       case "direct":
