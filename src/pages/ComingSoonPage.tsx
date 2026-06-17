@@ -1,6 +1,6 @@
 import { Gauge } from "lucide-react";
 
-import { Panel } from "../components/Panel";
+import { Panel } from "../component/Panel";
 
 export function ComingSoonPage({ title }: { title: string }) {
   return (
