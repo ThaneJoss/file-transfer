@@ -30,6 +30,8 @@ type R2ConnectionCode = {
   accountId: string;
   bucket: string;
   objectKey: string;
+  presignedUrl?: string;
+  expiresAt?: number;
   file: {
     name: string;
     size: number;
@@ -53,7 +55,6 @@ type StepStatus = "waiting" | "active" | "done";
 
 const region = "auto";
 const service = "s3";
-const emptySha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
@@ -200,6 +201,17 @@ function getAmzDates(date = new Date()) {
   };
 }
 
+function encodeQueryValue(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function canonicalQueryString(params: Record<string, string>) {
+  return Object.entries(params)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${encodeQueryValue(key)}=${encodeQueryValue(value)}`)
+    .join("&");
+}
+
 async function sha256Hex(value: string | ArrayBuffer | Uint8Array) {
   if (!globalThis.crypto?.subtle) {
     throw new Error("R2 签名需要浏览器 Web Crypto，请使用 HTTPS 或 localhost 打开页面。");
@@ -290,6 +302,62 @@ async function signedR2Request({
   };
 }
 
+async function presignedR2Url({
+  credentials,
+  method,
+  objectKey,
+  expiresIn,
+}: {
+  credentials: R2Credentials;
+  method: "GET" | "HEAD";
+  objectKey: string;
+  expiresIn: number;
+}) {
+  const accountId = credentials.accountId.trim();
+  const bucket = credentials.bucket.trim();
+  const accessKeyId = credentials.accessKeyId.trim();
+  const secretAccessKey = credentials.secretAccessKey.trim();
+  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) {
+    throw new Error("请填写 Account ID、Bucket、Access Key ID 和 Secret Access Key。");
+  }
+  if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
+    throw new Error("预签名下载链接有效期必须是 1 到 604800 秒。");
+  }
+
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const { amzDate, dateStamp } = getAmzDates();
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const payloadHash = "UNSIGNED-PAYLOAD";
+  const query = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Content-Sha256": payloadHash,
+    "X-Amz-Credential": `${accessKeyId}/${credentialScope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(expiresIn),
+    "X-Amz-SignedHeaders": "host",
+  };
+  const canonicalRequest = [
+    method,
+    canonicalUri(bucket, objectKey),
+    canonicalQueryString(query),
+    `host:${host}\n`,
+    "host",
+    payloadHash,
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+  const signingKey = await getSigningKey(secretAccessKey, dateStamp);
+  const signature = bytesToHex(await hmac(signingKey, stringToSign));
+  return `${r2Endpoint(accountId)}${canonicalUri(bucket, objectKey)}?${canonicalQueryString({
+    ...query,
+    "X-Amz-Signature": signature,
+  })}`;
+}
+
 async function copyText(text: string) {
   if (!text) return;
   if (navigator.clipboard && window.isSecureContext) {
@@ -321,7 +389,7 @@ function saveBlob(file: ReceivedFile) {
 
 function formatFetchError(error: unknown) {
   if (error instanceof TypeError) {
-    return "浏览器请求 R2 失败。请检查 bucket CORS 是否允许当前页面 Origin、Authorization、x-amz-date、x-amz-content-sha256、PUT/GET/HEAD。";
+    return "浏览器请求 R2 失败。请检查 bucket CORS 是否允许当前页面 Origin、PUT/GET，以及上传所需的 Authorization、Content-Type、x-amz-date、x-amz-content-sha256。";
   }
   return error instanceof Error ? error.message : "R2 请求失败。";
 }
@@ -496,6 +564,7 @@ export default function R2Page() {
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [prefix, setPrefix] = useState("file-transfer");
+  const [downloadTtl, setDownloadTtl] = useState("3600");
   const [mode, setMode] = useState<Mode>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [objectKey, setObjectKey] = useState("");
@@ -520,8 +589,10 @@ export default function R2Page() {
   );
   const totalBytes = selectedFile?.size ?? incomingCode?.file.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
-  const endpointLabel = accountId ? `${accountId}.r2.cloudflarestorage.com` : "未配置";
+  const endpointAccountId = accountId || incomingCode?.accountId || "";
+  const endpointLabel = endpointAccountId ? `${endpointAccountId}.r2.cloudflarestorage.com` : "未配置";
   const objectUrl = objectKey ? r2ObjectUrl(credentials, objectKey) : incomingCode ? r2ObjectUrl(incomingCode, incomingCode.objectKey) : "";
+  const expiresAtText = incomingCode?.expiresAt ? new Date(incomingCode.expiresAt).toLocaleString() : "未生成";
 
   function resetAll() {
     setMode(null);
@@ -580,6 +651,10 @@ export default function R2Page() {
       setSenderProgress(1);
       setSenderStatus("正在计算文件 SHA-256 并签名 R2 PUT 请求...");
       setObjectKey(key);
+      const expiresIn = Number(downloadTtl);
+      if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
+        throw new Error("下载链接有效期必须是 1 到 604800 秒。");
+      }
 
       const buffer = await selectedFile.arrayBuffer();
       const payloadHash = await sha256Hex(buffer);
@@ -602,11 +677,20 @@ export default function R2Page() {
         throw new Error(`R2 上传失败：HTTP ${response.status}${text ? `，${text.slice(0, 180)}` : ""}`);
       }
 
+      setSenderStatus("正在生成预签名下载链接...");
+      const presignedUrl = await presignedR2Url({
+        credentials,
+        method: "GET",
+        objectKey: key,
+        expiresIn,
+      });
       const code = await encodeConnectionCode({
         kind: "cloudflare-r2-file-v1",
         accountId: credentials.accountId.trim(),
         bucket: credentials.bucket.trim(),
         objectKey: key,
+        presignedUrl,
+        expiresAt: Date.now() + expiresIn * 1000,
         file: {
           name: selectedFile.name,
           size: selectedFile.size,
@@ -618,7 +702,7 @@ export default function R2Page() {
       setUploadedBytes(selectedFile.size);
       setSenderProgress(100);
       setConnectionCode(code);
-      setSenderStatus("文件已上传到 R2。复制连接码给接收方。");
+      setSenderStatus(`文件已上传到 R2。预签名下载链接有效期 ${expiresIn} 秒，复制连接码给接收方。`);
     } catch (error) {
       setSenderError(formatFetchError(error));
       setSenderProgress(0);
@@ -635,9 +719,11 @@ export default function R2Page() {
       setReceiverProgress(0);
       const code = await decodeConnectionCode(receiverCodeInput);
       setIncomingCode(code);
-      if (!accountId) setAccountId(code.accountId);
-      if (!bucket) setBucket(code.bucket);
-      setReceiverStatus(`已读取连接码：${code.file.name}，${formatBytes(code.file.size)}。`);
+      setReceiverStatus(
+        code.presignedUrl
+          ? `已读取连接码：${code.file.name}，${formatBytes(code.file.size)}。接收方无需 R2 凭证。`
+          : "这个连接码缺少预签名下载链接，请让发送方用新版 R2 页面重新上传并复制连接码。",
+      );
     } catch (error) {
       setReceiverError(error instanceof Error ? error.message : "读取 R2 连接码失败。");
     }
@@ -650,30 +736,21 @@ export default function R2Page() {
         setReceiverError("请先粘贴并读取 R2 连接码。");
         return;
       }
+      if (!code.presignedUrl) {
+        throw new Error("这个连接码缺少预签名下载链接，请让发送方用新版 R2 页面重新上传并复制连接码。");
+      }
+      if (code.expiresAt && Date.now() > code.expiresAt) {
+        throw new Error("预签名下载链接已过期，请让发送方重新上传或重新生成连接码。");
+      }
 
       setIsDownloading(true);
       setReceiverError("");
       setIncomingCode(code);
       setDownloadedBytes(0);
       setReceiverProgress(1);
-      setReceiverStatus("正在签名 R2 GET 请求...");
-
-      const signed = await signedR2Request({
-        credentials: {
-          accountId: accountId.trim() || code.accountId,
-          bucket: bucket.trim() || code.bucket,
-          accessKeyId,
-          secretAccessKey,
-        },
+      setReceiverStatus("正在使用预签名链接从 Cloudflare R2 下载文件...");
+      const response = await fetch(code.presignedUrl, {
         method: "GET",
-        objectKey: code.objectKey,
-        payloadHash: emptySha256,
-      });
-
-      setReceiverStatus("正在从 Cloudflare R2 下载文件...");
-      const response = await fetch(signed.url, {
-        method: "GET",
-        headers: signed.headers,
       });
       if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -705,9 +782,15 @@ export default function R2Page() {
   }
 
   const codeSize = connectionCode ? `${connectionCode.length.toLocaleString()} 字符` : "";
-  const credentialsReady = Boolean(accountId && bucket && accessKeyId && secretAccessKey);
+  const credentialsReady =
+    mode === "receive" ? Boolean(incomingCode?.presignedUrl || receiverCodeInput.trim()) : Boolean(accountId && bucket && accessKeyId && secretAccessKey);
   const steps: Array<{ label: string; meta: string; icon: typeof Circle; status: StepStatus }> = [
-    { label: "凭证", meta: credentialsReady ? "已填写" : "等待填写", icon: KeyRound, status: credentialsReady ? "done" : "waiting" },
+    {
+      label: mode === "receive" ? "连接码" : "凭证",
+      meta: credentialsReady ? (mode === "receive" ? "已粘贴" : "已填写") : mode === "receive" ? "等待粘贴" : "等待填写",
+      icon: mode === "receive" ? Link2 : KeyRound,
+      status: credentialsReady ? "done" : "waiting",
+    },
     { label: "对象", meta: objectKey || incomingCode?.objectKey ? "已定位" : "等待生成", icon: FileText, status: objectKey || incomingCode?.objectKey ? "done" : "waiting" },
     { label: "传输", meta: isUploading || isDownloading ? "进行中" : progress >= 100 ? "已完成" : "等待开始", icon: UploadCloud, status: isUploading || isDownloading ? "active" : progress >= 100 ? "done" : "waiting" },
     { label: "文件", meta: progress >= 100 ? "可下载" : "等待完成", icon: Check, status: progress >= 100 ? "done" : "waiting" },
@@ -759,6 +842,7 @@ export default function R2Page() {
           <Metric label="Bucket" value={bucket || incomingCode?.bucket || "未配置"} icon={Database} active={Boolean(bucket || incomingCode?.bucket)} />
           <Metric label="对象 Key" value={objectKey || incomingCode?.objectKey || "未生成"} icon={FileText} active={Boolean(objectKey || incomingCode?.objectKey)} />
           <Metric label="对象 URL" value={objectUrl || "未生成"} icon={Link2} />
+          <Metric label="下载链接过期" value={expiresAtText} icon={Gauge} active={Boolean(incomingCode?.expiresAt)} />
           <Metric label="选中文件" value={selectedFile ? selectedFile.name : incomingCode?.file.name ?? "未选择"} icon={HardDrive} />
           <Metric label="文件大小" value={totalBytes ? formatBytes(totalBytes) : "0 B"} icon={Database} />
           <Metric label="已上传" value={formatBytes(uploadedBytes)} icon={UploadCloud} />
@@ -771,18 +855,21 @@ export default function R2Page() {
         <Panel className="min-h-0 overflow-visible p-[clamp(16px,1.45vw,22px)] max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
           <div className="mb-4">
             <h2 className="text-[22px] font-extrabold text-[#061b3a]">Cloudflare R2</h2>
-            <p className="mt-1 text-[15px] text-[#526c92]">Access Key ID / Secret Access Key 由用户在浏览器内填写。</p>
+            <p className="mt-1 text-[15px] text-[#526c92]">
+              {mode === "receive" ? "接收方只需要粘贴发送方的 R2 连接码。" : "发送方在浏览器内填写 R2 凭证，用于上传和生成预签名下载链接。"}
+            </p>
           </div>
 
-          <div className="mb-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
-            <TextInput label="Account ID" value={accountId} onChange={setAccountId} placeholder="Cloudflare account id" />
-            <TextInput label="Bucket" value={bucket} onChange={setBucket} placeholder="R2 bucket name" />
-            <TextInput label="Access Key ID" value={accessKeyId} onChange={setAccessKeyId} placeholder="R2 access key id" />
-            <TextInput label="Secret Access Key" value={secretAccessKey} onChange={setSecretAccessKey} placeholder="R2 secret access key" type="password" />
-            <div className="col-span-2 max-[720px]:col-span-1">
+          {mode !== "receive" && (
+            <div className="mb-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+              <TextInput label="Account ID" value={accountId} onChange={setAccountId} placeholder="Cloudflare account id" />
+              <TextInput label="Bucket" value={bucket} onChange={setBucket} placeholder="R2 bucket name" />
+              <TextInput label="Access Key ID" value={accessKeyId} onChange={setAccessKeyId} placeholder="R2 access key id" />
+              <TextInput label="Secret Access Key" value={secretAccessKey} onChange={setSecretAccessKey} placeholder="R2 secret access key" type="password" />
               <TextInput label="对象前缀" value={prefix} onChange={setPrefix} placeholder="file-transfer" />
+              <TextInput label="下载链接有效期秒" value={downloadTtl} onChange={setDownloadTtl} placeholder="3600" />
             </div>
-          </div>
+          )}
 
           {!mode && (
             <div className="grid gap-3">
