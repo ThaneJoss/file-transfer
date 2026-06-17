@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AppShell, routes } from "./components/AppShell";
-import type { AppRoute, AppRouteId } from "./components/AppShell";
+import { AppShell, routes } from "./layout/AppShell";
+import type { AppRoute, AppRouteId } from "./layout/AppShell";
 import DirectPage from "./pages/DirectPage";
 import R2Page from "./pages/R2Page";
 import SfuPage from "./pages/SfuPage";
-import StunPage from "./pages/StunPage";
-import TurnPage from "./pages/TurnPage";
+import STUNPage from "./pages/STUNPage";
+import TURNPage from "./pages/TURNPage";
 
 function routeFromPath(pathname: string): AppRoute {
   if (pathname === "/") return routes[0];
@@ -32,9 +32,9 @@ export default function App() {
   const page = useMemo(() => {
     switch (activeRoute) {
       case "stun":
-        return <StunPage />;
+        return <STUNPage />;
       case "turn":
-        return <TurnPage />;
+        return <TURNPage />;
       case "sfu":
         return <SfuPage />;
       case "r2":
