@@ -14,10 +14,10 @@ export function TextArea({
   readOnly?: boolean;
 }) {
   return (
-    <label className="grid gap-2">
-      <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
+    <label className="grid min-w-0 gap-2">
+      <span className="min-w-0 truncate text-sm font-extrabold text-[#233d64]" title={label}>{label}</span>
       <textarea
-        className={`h-[clamp(88px,10.5dvh,118px)] min-h-0 resize-none rounded-xl border border-[#d7e5f6] px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px] ${
+        className={`h-[clamp(88px,10.5dvh,118px)] min-h-0 min-w-0 resize-none rounded-xl border border-[#d7e5f6] px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px] ${
           readOnly ? "bg-[#f7fbff]" : "bg-white"
         }`}
         value={value}
@@ -48,10 +48,10 @@ export function TextInput({
   max?: number;
 }) {
   return (
-    <label className="grid gap-2">
-      <span className="text-sm font-extrabold text-[#233d64]">{label}</span>
+    <label className="grid min-w-0 gap-2">
+      <span className="min-w-0 truncate text-sm font-extrabold text-[#233d64]" title={label}>{label}</span>
       <input
-        className="h-11 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[14px] font-semibold text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10"
+        className="h-11 min-w-0 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[14px] font-semibold text-[#17345f] outline-none transition placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-4 focus:ring-[#1677ff]/10"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -77,7 +77,7 @@ export function PrimaryButton({
 }) {
   return (
     <button
-      className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#1677ff] px-5 text-[15px] font-extrabold text-white shadow-[0_12px_22px_rgba(47,125,246,0.22)] transition hover:-translate-y-px hover:bg-[#0d63da] disabled:cursor-not-allowed disabled:bg-[#a9bdd8] disabled:shadow-none disabled:hover:translate-y-0"
+      className="inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-[#1677ff] px-5 text-center text-[15px] font-extrabold text-white shadow-[0_12px_22px_rgba(47,125,246,0.22)] transition [overflow-wrap:anywhere] hover:-translate-y-px hover:bg-[#0d63da] disabled:cursor-not-allowed disabled:bg-[#a9bdd8] disabled:shadow-none disabled:hover:translate-y-0"
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -98,7 +98,7 @@ export function SecondaryButton({
 }) {
   return (
     <button
-      className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#d7e5f6] bg-white px-4 text-[15px] font-extrabold text-[#17345f] transition hover:-translate-y-px hover:border-[#9ec7ff] disabled:cursor-not-allowed disabled:text-[#98a9c0] disabled:hover:translate-y-0"
+      className="inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-4 text-center text-[15px] font-extrabold text-[#17345f] transition [overflow-wrap:anywhere] hover:-translate-y-px hover:border-[#9ec7ff] disabled:cursor-not-allowed disabled:text-[#98a9c0] disabled:hover:translate-y-0"
       type="button"
       onClick={onClick}
       disabled={disabled}

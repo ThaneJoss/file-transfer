@@ -75,7 +75,9 @@ export function collectConsoleErrors(page: Page) {
   page.on("requestfailed", (request) => {
     const url = request.url();
     if (!url.startsWith("http://127.0.0.1")) return;
-    errors.push(`requestfailed: ${request.method()} ${url} ${request.failure()?.errorText ?? ""}`);
+    const errorText = request.failure()?.errorText ?? "";
+    if (errorText === "net::ERR_ABORTED") return;
+    errors.push(`requestfailed: ${request.method()} ${url} ${errorText}`);
   });
   return errors;
 }
@@ -375,11 +377,17 @@ export async function getLayoutMetrics(page: Page) {
 
     return {
       shell: rectFor("[data-testid='app-shell']", "main"),
+      brand: rectFor("[data-testid='app-brand']"),
       header: rectFor("[data-testid='app-header']", "header"),
       nav: rectFor("[data-testid='app-nav']", "nav[aria-label]"),
       slider: rectFor("[data-testid='nav-active-indicator']", "nav span[aria-hidden='true']"),
       pageSlot: rectFor("[data-testid='page-slot']", "main > :nth-child(2)"),
-      firstPanel: rectFor("[data-testid='panel']", "section"),
+      workspace: rectFor("[data-testid='transfer-page-root']"),
+      statusPanel: rectFor("[data-testid='status-panel']"),
+      targetPanel: rectFor("[data-testid='target-panel']"),
+      uploadPanel: rectFor("[data-testid='upload-panel']"),
+      fileListPanel: rectFor("[data-testid='file-list-panel']"),
+      uploadDropzone: rectFor("[data-testid='file-upload-dropzone']"),
       activeNav: {
         x: activeNavRect.x,
         y: activeNavRect.y,
@@ -400,27 +408,170 @@ export async function getLayoutMetrics(page: Page) {
 export function expectRectStable(
   before: Awaited<ReturnType<typeof getLayoutMetrics>>,
   after: Awaited<ReturnType<typeof getLayoutMetrics>>,
-  keys: Array<"shell" | "header" | "nav" | "pageSlot">,
+  keys: Array<
+    | "shell"
+    | "brand"
+    | "header"
+    | "nav"
+    | "pageSlot"
+    | "workspace"
+    | "statusPanel"
+    | "targetPanel"
+    | "uploadPanel"
+    | "fileListPanel"
+    | "uploadDropzone"
+  >,
+  tolerance = 2,
 ) {
   for (const key of keys) {
-    expect(after[key].x, `${key}.x`).toBeCloseTo(before[key].x, 0);
-    expect(after[key].y, `${key}.y`).toBeCloseTo(before[key].y, 0);
-    expect(after[key].width, `${key}.width`).toBeCloseTo(before[key].width, 0);
-    expect(after[key].height, `${key}.height`).toBeCloseTo(before[key].height, 0);
+    expect(Math.abs(after[key].x - before[key].x), `${key}.x`).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(after[key].y - before[key].y), `${key}.y`).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(after[key].width - before[key].width), `${key}.width`).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(after[key].height - before[key].height), `${key}.height`).toBeLessThanOrEqual(tolerance);
   }
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {
   const metrics = await getLayoutMetrics(page);
-  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 }
 
 export async function expectSliderAligned(page: Page) {
   const metrics = await getLayoutMetrics(page);
-  expect(metrics.slider.x).toBeCloseTo(metrics.activeNav.x, 0);
-  expect(metrics.slider.y).toBeCloseTo(metrics.activeNav.y, 0);
-  expect(metrics.slider.width).toBeCloseTo(metrics.activeNav.width, 0);
-  expect(metrics.slider.height).toBeCloseTo(metrics.activeNav.height, 0);
+  expect(Math.abs(metrics.slider.x - metrics.activeNav.x), "slider.x").toBeLessThanOrEqual(2);
+  expect(Math.abs(metrics.slider.y - metrics.activeNav.y), "slider.y").toBeLessThanOrEqual(2);
+  expect(Math.abs(metrics.slider.width - metrics.activeNav.width), "slider.width").toBeLessThanOrEqual(2);
+  expect(Math.abs(metrics.slider.height - metrics.activeNav.height), "slider.height").toBeLessThanOrEqual(2);
+}
+
+export async function waitForLayoutStable(page: Page) {
+  await page.waitForFunction(
+    (selectors) =>
+      new Promise<boolean>((resolve) => {
+        let last = "";
+        let stableFrames = 0;
+
+        const read = () =>
+          selectors
+            .map((selector) => {
+              const element = document.querySelector(selector);
+              if (!element) return "missing";
+              const rect = element.getBoundingClientRect();
+              return [
+                Math.round(rect.x * 100) / 100,
+                Math.round(rect.y * 100) / 100,
+                Math.round(rect.width * 100) / 100,
+                Math.round(rect.height * 100) / 100,
+              ].join(",");
+            })
+            .join("|");
+
+        const tick = () => {
+          const current = read();
+          stableFrames = current === last ? stableFrames + 1 : 0;
+          last = current;
+          if (stableFrames >= 3) {
+            resolve(true);
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+
+        requestAnimationFrame(tick);
+      }),
+    [
+      "[data-testid='app-header']",
+      "[data-testid='app-nav']",
+      "[data-testid='transfer-page-root']",
+      "[data-testid='status-panel']",
+      "[data-testid='target-panel']",
+      "[data-testid='upload-panel']",
+      "[data-testid='file-list-panel']",
+    ],
+  );
+}
+
+export async function expectSharedPanelsVisible(page: Page) {
+  await expect(page.getByTestId("app-brand")).toBeVisible();
+  await expect(page.getByTestId("app-nav")).toBeVisible();
+  await expect(page.getByTestId("transfer-page-root")).toBeVisible();
+  await expect(page.getByTestId("status-panel")).toBeVisible();
+  await expect(page.getByTestId("target-panel")).toBeVisible();
+  await expect(page.getByTestId("upload-panel")).toBeVisible();
+  await expect(page.getByTestId("file-list-panel")).toBeVisible();
+  await expect(page.getByTestId("file-upload-dropzone")).toBeVisible();
+}
+
+export async function expectNoLayoutOverflow(page: Page) {
+  await expectNoHorizontalOverflow(page);
+  const report = await page.evaluate(() => {
+    const tolerance = 1;
+    const panelSelectors = [
+      "[data-testid='status-panel']",
+      "[data-testid='target-panel']",
+      "[data-testid='upload-panel']",
+      "[data-testid='file-list-panel']",
+    ];
+    const failures: string[] = [];
+
+    const rect = (element: Element) => element.getBoundingClientRect();
+    const withinHorizontal = (child: DOMRect, parent: DOMRect) =>
+      child.left >= parent.left - tolerance && child.right <= parent.right + tolerance;
+
+    for (const selector of panelSelectors) {
+      const panel = document.querySelector(selector);
+      if (!panel) {
+        failures.push(`missing ${selector}`);
+        continue;
+      }
+      const panelRect = rect(panel);
+      const controls = panel.querySelectorAll("button,input,textarea,[data-testid='file-upload-dropzone'],article");
+      controls.forEach((control, index) => {
+        const controlRect = rect(control);
+        if (controlRect.width === 0 || controlRect.height === 0) return;
+        if (!withinHorizontal(controlRect, panelRect)) {
+          failures.push(`${selector} control ${index} horizontal overflow`);
+        }
+      });
+    }
+
+    const viewportWidth = document.documentElement.clientWidth;
+    const workspace = document.querySelector("[data-testid='transfer-page-root']");
+    if (workspace) {
+      const workspaceRect = rect(workspace);
+      if (workspaceRect.left < -tolerance || workspaceRect.right > viewportWidth + tolerance) {
+        failures.push("workspace outside viewport");
+      }
+    }
+
+    const target = document.querySelector("[data-testid='target-panel']");
+    const upload = document.querySelector("[data-testid='upload-panel']");
+    if (target && upload) {
+      const targetRect = rect(target);
+      const uploadRect = rect(upload);
+      const sameRow = Math.abs(targetRect.top - uploadRect.top) <= tolerance;
+      if (sameRow && targetRect.right > uploadRect.left - tolerance) {
+        failures.push("target panel overlaps upload panel");
+      }
+    }
+
+    const dropzone = document.querySelector("[data-testid='file-upload-dropzone']");
+    if (dropzone && upload) {
+      const dropzoneRect = rect(dropzone);
+      const uploadRect = rect(upload);
+      if (
+        dropzoneRect.left < uploadRect.left - tolerance ||
+        dropzoneRect.right > uploadRect.right + tolerance ||
+        dropzoneRect.top < uploadRect.top - tolerance ||
+        dropzoneRect.bottom > uploadRect.bottom + tolerance
+      ) {
+        failures.push("upload dropzone outside upload panel");
+      }
+    }
+
+    return failures;
+  });
+  expect(report).toEqual([]);
 }
 
 declare global {

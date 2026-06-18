@@ -568,7 +568,7 @@ export function createSfuPage() {
             <p className="mt-1 text-[15px] text-[#526c92]">App ID / App Token 由用户在浏览器内填写。</p>
           </div>
 
-          <div className="mb-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+          <div className="adaptive-field-grid mb-4">
             <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
             <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
           </div>

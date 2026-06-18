@@ -408,7 +408,7 @@ export function createR2Page() {
           </div>
 
           {mode === "send" && (
-            <div className="mb-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+            <div className="adaptive-field-grid mb-4">
               <TextInput label="Account ID" value={accountId} onChange={setAccountId} placeholder="Cloudflare account id" />
               <TextInput label="Bucket" value={bucket} onChange={setBucket} placeholder="R2 bucket name" />
               <TextInput label="Access Key ID" value={accessKeyId} onChange={setAccessKeyId} placeholder="R2 access key id" />

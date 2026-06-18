@@ -1,0 +1,372 @@
+{
+  "direct": {
+    "header": {
+      "x": 148.5,
+      "y": 24,
+      "width": 1608,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "nav": {
+      "x": 685.5,
+      "y": 24,
+      "width": 534,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 685.5,
+      "right": 1219.5
+    },
+    "workspace": {
+      "x": 148.5,
+      "y": 106,
+      "width": 1608,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "statusPanel": {
+      "x": 148.5,
+      "y": 106,
+      "width": 528.08,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 676.58
+    },
+    "targetPanel": {
+      "x": 694.58,
+      "y": 106,
+      "width": 521.95,
+      "height": 399.8,
+      "top": 106,
+      "bottom": 505.8,
+      "left": 694.58,
+      "right": 1216.53
+    },
+    "uploadPanel": {
+      "x": 1234.53,
+      "y": 106,
+      "width": 521.97,
+      "height": 399.8,
+      "top": 106,
+      "bottom": 505.8,
+      "left": 1234.53,
+      "right": 1756.5
+    },
+    "fileListPanel": {
+      "x": 694.58,
+      "y": 523.8,
+      "width": 1061.92,
+      "height": 320.2,
+      "top": 523.8,
+      "bottom": 844,
+      "left": 694.58,
+      "right": 1756.5
+    },
+    "scrollWidth": 1905,
+    "clientWidth": 1920
+  },
+  "stun": {
+    "header": {
+      "x": 148.5,
+      "y": 24,
+      "width": 1608,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "nav": {
+      "x": 685.5,
+      "y": 24,
+      "width": 534,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 685.5,
+      "right": 1219.5
+    },
+    "workspace": {
+      "x": 148.5,
+      "y": 106,
+      "width": 1608,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "statusPanel": {
+      "x": 148.5,
+      "y": 106,
+      "width": 528.08,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 676.58
+    },
+    "targetPanel": {
+      "x": 694.58,
+      "y": 106,
+      "width": 521.95,
+      "height": 584.75,
+      "top": 106,
+      "bottom": 690.75,
+      "left": 694.58,
+      "right": 1216.53
+    },
+    "uploadPanel": {
+      "x": 1234.53,
+      "y": 106,
+      "width": 521.97,
+      "height": 584.75,
+      "top": 106,
+      "bottom": 690.75,
+      "left": 1234.53,
+      "right": 1756.5
+    },
+    "fileListPanel": {
+      "x": 694.58,
+      "y": 708.75,
+      "width": 1061.92,
+      "height": 135.25,
+      "top": 708.75,
+      "bottom": 844,
+      "left": 694.58,
+      "right": 1756.5
+    },
+    "scrollWidth": 1905,
+    "clientWidth": 1920
+  },
+  "turn": {
+    "header": {
+      "x": 148.5,
+      "y": 24,
+      "width": 1608,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "nav": {
+      "x": 685.5,
+      "y": 24,
+      "width": 534,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 685.5,
+      "right": 1219.5
+    },
+    "workspace": {
+      "x": 148.5,
+      "y": 106,
+      "width": 1608,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "statusPanel": {
+      "x": 148.5,
+      "y": 106,
+      "width": 528.08,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 676.58
+    },
+    "targetPanel": {
+      "x": 694.58,
+      "y": 106,
+      "width": 521.95,
+      "height": 635.75,
+      "top": 106,
+      "bottom": 741.75,
+      "left": 694.58,
+      "right": 1216.53
+    },
+    "uploadPanel": {
+      "x": 1234.53,
+      "y": 106,
+      "width": 521.97,
+      "height": 635.75,
+      "top": 106,
+      "bottom": 741.75,
+      "left": 1234.53,
+      "right": 1756.5
+    },
+    "fileListPanel": {
+      "x": 694.58,
+      "y": 759.75,
+      "width": 1061.92,
+      "height": 84.25,
+      "top": 759.75,
+      "bottom": 844,
+      "left": 694.58,
+      "right": 1756.5
+    },
+    "scrollWidth": 1905,
+    "clientWidth": 1920
+  },
+  "sfu": {
+    "header": {
+      "x": 148.5,
+      "y": 24,
+      "width": 1608,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "nav": {
+      "x": 685.5,
+      "y": 24,
+      "width": 534,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 685.5,
+      "right": 1219.5
+    },
+    "workspace": {
+      "x": 148.5,
+      "y": 106,
+      "width": 1608,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "statusPanel": {
+      "x": 148.5,
+      "y": 106,
+      "width": 528.08,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 676.58
+    },
+    "targetPanel": {
+      "x": 694.58,
+      "y": 106,
+      "width": 521.95,
+      "height": 497.5,
+      "top": 106,
+      "bottom": 603.5,
+      "left": 694.58,
+      "right": 1216.53
+    },
+    "uploadPanel": {
+      "x": 1234.53,
+      "y": 106,
+      "width": 521.97,
+      "height": 497.5,
+      "top": 106,
+      "bottom": 603.5,
+      "left": 1234.53,
+      "right": 1756.5
+    },
+    "fileListPanel": {
+      "x": 694.58,
+      "y": 621.5,
+      "width": 1061.92,
+      "height": 222.5,
+      "top": 621.5,
+      "bottom": 844,
+      "left": 694.58,
+      "right": 1756.5
+    },
+    "scrollWidth": 1905,
+    "clientWidth": 1920
+  },
+  "r2": {
+    "header": {
+      "x": 148.5,
+      "y": 24,
+      "width": 1608,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "nav": {
+      "x": 685.5,
+      "y": 24,
+      "width": 534,
+      "height": 62,
+      "top": 24,
+      "bottom": 86,
+      "left": 685.5,
+      "right": 1219.5
+    },
+    "workspace": {
+      "x": 148.5,
+      "y": 106,
+      "width": 1608,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 1756.5
+    },
+    "statusPanel": {
+      "x": 148.5,
+      "y": 106,
+      "width": 528.08,
+      "height": 738,
+      "top": 106,
+      "bottom": 844,
+      "left": 148.5,
+      "right": 676.58
+    },
+    "targetPanel": {
+      "x": 694.58,
+      "y": 106,
+      "width": 521.95,
+      "height": 414.05,
+      "top": 106,
+      "bottom": 520.05,
+      "left": 694.58,
+      "right": 1216.53
+    },
+    "uploadPanel": {
+      "x": 1234.53,
+      "y": 106,
+      "width": 521.97,
+      "height": 414.05,
+      "top": 106,
+      "bottom": 520.05,
+      "left": 1234.53,
+      "right": 1756.5
+    },
+    "fileListPanel": {
+      "x": 694.58,
+      "y": 538.05,
+      "width": 1061.92,
+      "height": 305.95,
+      "top": 538.05,
+      "bottom": 844,
+      "left": 694.58,
+      "right": 1756.5
+    },
+    "scrollWidth": 1905,
+    "clientWidth": 1920
+  }
+}

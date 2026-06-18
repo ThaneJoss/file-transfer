@@ -1620,8 +1620,8 @@ export function createTransferPage(variant: TransferVariant) {
             </div>
 
             {variant === "turn" && (
-              <div className="mb-4 grid gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
-                <div className="flex items-center justify-between gap-3">
+              <div className="mb-4 grid min-w-0 gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
+                <div className="inline-card-header">
                   <div className="min-w-0">
                     <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">Cloudflare TURN Credentials</h3>
                     <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={turnCredentialError || turnCredentialStatus}>
@@ -1633,7 +1633,7 @@ export function createTransferPage(variant: TransferVariant) {
                     生成
                   </SecondaryButton>
                 </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px] gap-3 max-[760px]:grid-cols-1">
+                <div className="adaptive-field-grid">
                   <TextInput label="Key ID" value={turnKeyId} onChange={setTurnKeyId} placeholder="Cloudflare TURN key id" />
                   <TextInput label="API Token" value={turnApiToken} onChange={setTurnApiToken} placeholder="Bearer token" type="password" />
                   <TextInput label="TTL 秒" value={turnTtl} onChange={setTurnTtl} type="number" min={60} max={86400} />
@@ -1642,8 +1642,8 @@ export function createTransferPage(variant: TransferVariant) {
             )}
 
             {usesIceServer && (
-              <div className="mb-4 grid gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
-                <div className="flex items-center justify-between gap-3">
+              <div className="mb-4 grid min-w-0 gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
+                <div className="inline-card-header">
                   <div className="min-w-0">
                     <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">步骤1 {protocolLabel} Probe</h3>
                     <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={stunProbeError || stunProbeStatus}>
@@ -1655,7 +1655,7 @@ export function createTransferPage(variant: TransferVariant) {
                     Probe
                   </SecondaryButton>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center text-[13px] max-[560px]:grid-cols-1">
+                <div className="probe-stat-grid text-[13px]">
                   {variant === "turn"
                     ? ([
                         ["udp", "UDP", turnProbeTransportSummary.udp],
@@ -1666,7 +1666,7 @@ export function createTransferPage(variant: TransferVariant) {
                         const selected = key === turnTransport;
                         return (
                           <button
-                            className={`rounded-lg border px-2 py-2 text-center transition ${
+                            className={`min-w-0 rounded-lg border px-2 py-2 text-center transition ${
                               selected
                                 ? "border-[#1677ff] bg-[#eaf4ff] text-[#0d63da] shadow-[0_8px_18px_rgba(47,125,246,0.12)]"
                                 : "border-[#dfeaf7] bg-white text-[#142a4f] hover:border-[#9ec7ff]"
@@ -1682,14 +1682,14 @@ export function createTransferPage(variant: TransferVariant) {
                             }}
                             type="button"
                           >
-                            <span className="block text-[#6a7f9e]">{label}</span>
+                            <span className="block min-w-0 truncate text-[#6a7f9e]">{label}</span>
                             <strong className="text-[15px]">{value}</strong>
                           </button>
                         );
                       })
                     : (["host", "srflx", "relay", "total"] as const).map((key) => (
-                        <span className="rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
-                          <span className="block text-[#6a7f9e]">{key}</span>
+                        <span className="min-w-0 rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
+                          <span className="block min-w-0 truncate text-[#6a7f9e]">{key}</span>
                           <strong className="text-[15px] text-[#142a4f]">{stunProbeSummary[key]}</strong>
                         </span>
                       ))}
