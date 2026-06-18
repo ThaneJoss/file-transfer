@@ -32,7 +32,7 @@ export function AppShell({
 
   return (
     <main
-      className="mx-auto flex h-dvh min-w-0 w-full max-w-[1680px] flex-col overflow-hidden px-[clamp(14px,2vw,36px)] py-[clamp(14px,1.8vw,24px)] max-[1180px]:py-[clamp(18px,2.5vw,34px)]"
+      className="app-shell mx-auto flex h-dvh min-w-0 flex-col overflow-hidden"
       data-testid="app-shell"
     >
       <header
@@ -43,6 +43,7 @@ export function AppShell({
           className="inline-flex w-fit items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
           to={routes[0].path}
           aria-label="文件中转站首页"
+          data-testid="app-brand"
         >
           <span className="grid size-11 place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(47,125,246,0.34)]">
             <Cloud aria-hidden="true" size={26} />
@@ -82,7 +83,7 @@ export function AppShell({
         </nav>
       </header>
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto" data-testid="page-slot">
+      <section className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto" data-testid="page-slot">
         {children}
       </section>
     </main>

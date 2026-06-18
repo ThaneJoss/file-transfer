@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Check,
   Copy,
   Database,
@@ -28,10 +29,10 @@ import {
 } from "../features/r2/services/r2Signing";
 import {
   ActionPanel,
+  ConnectionDetails,
   FilePickerPanel,
   FilesPanel,
   MainPanelGrid,
-  MetricGrid,
   ReceivedFilesPanel,
   RoleOption,
   StatusPanel,
@@ -123,6 +124,7 @@ export function createR2Page() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
 
   useEffect(() => {
     return () => {
@@ -148,6 +150,7 @@ export function createR2Page() {
   }
 
   function resetAll() {
+    setStatusPanelView("status");
     setMode(null);
     setSelectedFile(null);
     setObjectKey("");
@@ -379,23 +382,41 @@ export function createR2Page() {
   return (
     <TransferPageGrid>
       <StatusPanel>
-        <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-          <div>
-            <h2 className="text-[22px] font-extrabold text-[#061b3a]">R2 传输状态</h2>
-            <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare R2 S3 API 上传和下载临时文件。</p>
-          </div>
-          <SecondaryButton onClick={resetAll}>
-            <RefreshCw aria-hidden="true" size={17} />
-            重置
-          </SecondaryButton>
-        </div>
+        {statusPanelView === "details" ? (
+          <>
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
+                <p className="mt-1 text-[15px] text-[#526c92]">查看 R2 对象、连接码、下载链接和传输进度。</p>
+              </div>
+              <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                <ArrowLeft aria-hidden="true" size={17} />
+                返回状态
+              </SecondaryButton>
+            </div>
 
-        <TransferSteps steps={steps} />
+            <ConnectionDetails items={details} expanded showHeading={false} />
+          </>
+        ) : (
+          <>
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[22px] font-extrabold text-[#061b3a]">R2 传输状态</h2>
+                <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare R2 S3 API 上传和下载临时文件。</p>
+              </div>
+              <SecondaryButton onClick={resetAll}>
+                <RefreshCw aria-hidden="true" size={17} />
+                重置
+              </SecondaryButton>
+            </div>
 
-        <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+            <TransferSteps steps={steps} />
 
-        <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-        <MetricGrid items={details} />
+            <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+
+            <ConnectionDetails items={details} onShowMore={() => setStatusPanelView("details")} />
+          </>
+        )}
       </StatusPanel>
 
       <MainPanelGrid>
@@ -408,7 +429,7 @@ export function createR2Page() {
           </div>
 
           {mode === "send" && (
-            <div className="mb-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+            <div className="adaptive-field-grid mb-4">
               <TextInput label="Account ID" value={accountId} onChange={setAccountId} placeholder="Cloudflare account id" />
               <TextInput label="Bucket" value={bucket} onChange={setBucket} placeholder="R2 bucket name" />
               <TextInput label="Access Key ID" value={accessKeyId} onChange={setAccessKeyId} placeholder="R2 access key id" />

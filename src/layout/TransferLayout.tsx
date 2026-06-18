@@ -31,7 +31,7 @@ type TransferFileItem = {
 export function TransferPageGrid({ children }: { children: ReactNode }) {
   return (
     <div
-      className="grid min-h-full grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[auto_auto] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]"
+      className="transfer-page-grid"
       data-testid="transfer-page-root"
     >
       {children}
@@ -41,15 +41,15 @@ export function TransferPageGrid({ children }: { children: ReactNode }) {
 
 export function StatusPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="row-span-2 flex flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:row-span-1 max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
-      {children}
+    <Panel className="transfer-panel transfer-status-panel" testId="status-panel">
+      <div className="transfer-panel-body transfer-status-panel-body">{children}</div>
     </Panel>
   );
 }
 
 export function MainPanelGrid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid grid-cols-2 gap-[clamp(12px,1.2vw,18px)] max-[980px]:grid-cols-1 max-[980px]:gap-[clamp(14px,1.5vw,22px)]">
+    <div className="transfer-main-panel-grid">
       {children}
     </div>
   );
@@ -57,15 +57,15 @@ export function MainPanelGrid({ children }: { children: ReactNode }) {
 
 export function ActionPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="overflow-visible p-[clamp(16px,1.45vw,22px)] max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
-      {children}
+    <Panel className="transfer-panel transfer-action-panel" testId="target-panel">
+      <div className="transfer-panel-body">{children}</div>
     </Panel>
   );
 }
 
 export function UploadPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+    <Panel className="transfer-panel transfer-upload-panel" testId="upload-panel">
       {children}
     </Panel>
   );
@@ -73,8 +73,8 @@ export function UploadPanel({ children }: { children: ReactNode }) {
 
 export function FilesPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="flex flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
-      {children}
+    <Panel className="transfer-panel transfer-files-panel" testId="file-list-panel">
+      <div className="transfer-panel-body">{children}</div>
     </Panel>
   );
 }
@@ -124,26 +124,55 @@ export function MetricGrid({ items }: { items: MetricItem[] }) {
   );
 }
 
+export function ConnectionDetails({
+  items,
+  primaryCount = 4,
+  expanded = false,
+  showHeading = true,
+  onShowMore,
+}: {
+  items: MetricItem[];
+  primaryCount?: number;
+  expanded?: boolean;
+  showHeading?: boolean;
+  onShowMore?: () => void;
+}) {
+  const visibleItems = expanded ? items : items.slice(0, primaryCount);
+  const hasMoreItems = items.length > primaryCount;
+
+  return (
+    <section className={`connection-details ${expanded ? "connection-details-expanded" : ""}`}>
+      {showHeading && <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>}
+      <MetricGrid items={visibleItems} />
+      {!expanded && hasMoreItems && onShowMore && (
+        <button className="connection-details-more" type="button" onClick={onShowMore}>
+          更多详情
+        </button>
+      )}
+    </section>
+  );
+}
+
 function MetricCard({ item }: { item: MetricItem }) {
   const Icon = item.icon;
   return (
-    <div className="grid min-h-[62px] grid-cols-[30px_minmax(0,1fr)] items-center gap-2.5 rounded-xl border border-[#dfeaf7] bg-white/65 px-3 py-2.5 text-[13px] shadow-[0_6px_16px_rgba(16,34,59,0.025)]">
+    <div className="grid min-h-[62px] min-w-0 grid-cols-[30px_minmax(0,1fr)] items-center gap-2.5 rounded-xl border border-[#dfeaf7] bg-white/65 px-3 py-2.5 text-[13px] shadow-[0_6px_16px_rgba(16,34,59,0.025)]">
       <span className="grid size-[30px] place-items-center rounded-lg bg-[#eef6ff] text-[#1677ff]">
         <Icon aria-hidden="true" size={16} />
       </span>
       {item.progress == null ? (
         <span className="min-w-0">
-          <span className="block whitespace-nowrap text-[#6a7f9e]">{item.label}</span>
+          <span className="block min-w-0 truncate text-[#6a7f9e]" title={item.label}>{item.label}</span>
           <strong className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[14px] font-extrabold text-[#142a4f]">
             {item.active && <span className="inline-block size-2 shrink-0 rounded-full bg-[#1dc85f]" />}
-            <span className="min-w-0 truncate">{item.value}</span>
+            <span className="min-w-0 truncate" title={item.value}>{item.value}</span>
           </strong>
         </span>
       ) : (
         <span className="grid min-w-0 gap-1.5">
           <span className="flex items-center justify-between gap-2">
-            <span className="whitespace-nowrap text-[#6a7f9e]">{item.label}</span>
-            <strong className="text-[14px] font-extrabold text-[#142a4f]">{item.value}</strong>
+            <span className="min-w-0 truncate text-[#6a7f9e]" title={item.label}>{item.label}</span>
+            <strong className="shrink-0 text-[14px] font-extrabold text-[#142a4f]" title={item.value}>{item.value}</strong>
           </span>
           <span className="h-1.5 rounded-full bg-[#dce8f7]">
             <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${item.progress}%` }} />
@@ -206,10 +235,11 @@ export function FilePickerPanel({
 }) {
   return (
     <div
-      className="grid h-full min-h-[220px] place-items-center rounded-2xl border-2 border-dashed border-[#bdd3f1] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(244,249,255,0.78))] px-5 py-5 text-center max-[1180px]:min-h-[300px] max-[1180px]:py-7"
+      className="file-picker-panel"
       onDrop={onDrop}
       onDragOver={(event) => event.preventDefault()}
       aria-label={ariaLabel}
+      data-testid="file-upload-dropzone"
     >
       <input ref={inputRef} className="hidden" type="file" onChange={onFileInput} />
       <div className="mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px]">
