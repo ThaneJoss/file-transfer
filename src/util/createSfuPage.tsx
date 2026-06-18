@@ -19,6 +19,16 @@ import type { ChangeEvent, DragEvent } from "react";
 
 import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
 import {
+  CallsSession,
+  createCallsSession,
+  createPublisherChannel,
+  createSubscriberChannel,
+  establishDataChannelTransport,
+  SfuCredentials,
+} from "../features/sfu/services/callsApi";
+import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
+import { waitForBuffer, waitForDataChannelOpen } from "../features/transfer/services/dataChannel";
+import {
   ActionPanel,
   FilePickerPanel,
   FilesPanel,
@@ -32,11 +42,10 @@ import {
   UploadPanel,
 } from "../layout/TransferLayout";
 import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
-
-type Credentials = {
-  appId: string;
-  appToken: string;
-};
+import { copyText } from "../lib/browser/clipboard";
+import { saveBlob } from "../lib/browser/download";
+import { createStableId } from "../lib/browser/stableId";
+import { formatBytes, formatPercent } from "../lib/files/format";
 
 type TransferMeta = {
   kind: "meta";
@@ -58,31 +67,6 @@ type SfuConnectionCode = {
   createdAt: number;
 };
 
-type CallsSession = {
-  id: string;
-  peerConnection: RTCPeerConnection;
-};
-
-type DataChannelObject = {
-  id?: number;
-  dataChannelName?: string;
-  location?: "local" | "remote";
-  sessionId?: string;
-  errorCode?: string;
-  errorDescription?: string;
-};
-
-type CallsApiResponse = {
-  errorCode?: string;
-  errorDescription?: string;
-  sessionId?: string;
-  sessionDescription?: RTCSessionDescriptionInit;
-  requiresImmediateRenegotiation?: boolean;
-  dataChannel?: DataChannelObject;
-  dataChannels?: DataChannelObject[];
-  datachannels?: DataChannelObject[];
-};
-
 type ReceivedFile = {
   id: string;
   name: string;
@@ -94,91 +78,21 @@ type ReceivedFile = {
 
 type Mode = "send" | "receive" | null;
 
-const apiOrigin = "https://rtc.live.cloudflare.com/v1";
 const chunkSize = 256 * 1024;
 const highWaterMark = 16 * 1024 * 1024;
 const lowWaterMark = 4 * 1024 * 1024;
 const progressUpdateIntervalMs = 100;
 const channelOpenTimeoutMs = 30000;
 
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
-}
-
-function formatPercent(value: number) {
-  return `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
-}
-
-function createStableId() {
-  const randomUUID = (globalThis.crypto as (Crypto & { randomUUID?: () => string }) | undefined)?.randomUUID;
-  if (randomUUID) return randomUUID.call(globalThis.crypto);
-
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-}
-
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string) {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 async function encodeConnectionCode(payload: SfuConnectionCode) {
-  const json = JSON.stringify(payload);
-  const compression = globalThis.CompressionStream;
-  if (!compression) {
-    return `J1.${bytesToBase64Url(new TextEncoder().encode(json))}`;
-  }
-
-  const stream = new Blob([json]).stream().pipeThrough(new compression("gzip"));
-  const buffer = await new Response(stream).arrayBuffer();
-  return `D1.${bytesToBase64Url(new Uint8Array(buffer))}`;
+  return encodeConnectionPayload(payload);
 }
 
 async function decodeConnectionCode(value: string): Promise<SfuConnectionCode> {
   const trimmed = value.trim();
   if (!trimmed) throw new Error("请先粘贴 SFU 连接码。");
 
-  let json: string;
-  if (trimmed.startsWith("J1.")) {
-    json = new TextDecoder().decode(base64UrlToBytes(trimmed.slice(3)));
-  } else if (trimmed.startsWith("D1.")) {
-    const decompression = globalThis.DecompressionStream;
-    if (!decompression) {
-      throw new Error("当前浏览器不能解压 D1 连接码，请换用最新版 Chrome、Edge 或 Safari。");
-    }
-    const bytes = base64UrlToBytes(trimmed.slice(3));
-    const stream = new Blob([bytes]).stream().pipeThrough(new decompression("gzip"));
-    json = await new Response(stream).text();
-  } else {
-    json = trimmed;
-  }
+  const json = await decodeConnectionPayload(trimmed, "当前浏览器不能解压 D1 连接码，请换用最新版 Chrome、Edge 或 Safari。");
 
   const payload = JSON.parse(json) as SfuConnectionCode;
   if (
@@ -193,59 +107,6 @@ async function decodeConnectionCode(value: string): Promise<SfuConnectionCode> {
   return payload;
 }
 
-async function copyText(text: string) {
-  if (!text) return;
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.left = "-9999px";
-  document.body.append(area);
-  area.select();
-  const copied = document.execCommand("copy");
-  area.remove();
-  if (!copied) throw new Error("复制失败，请手动选中文本复制。");
-}
-
-function saveBlob(file: ReceivedFile) {
-  const anchor = document.createElement("a");
-  anchor.href = file.url;
-  anchor.download = file.name;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-}
-
-function validateCredentials({ appId, appToken }: Credentials) {
-  if (!appId.trim() || !appToken.trim()) {
-    throw new Error("请填写 Cloudflare Realtime App ID 和 App Token。");
-  }
-}
-
-async function callsFetch(credentials: Credentials, path: string, init: RequestInit = {}) {
-  validateCredentials(credentials);
-  const response = await fetch(`${apiOrigin}/apps/${encodeURIComponent(credentials.appId.trim())}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${credentials.appToken.trim()}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-  const data = (await response.json().catch(() => ({}))) as CallsApiResponse;
-  const message = data.errorDescription || data.errorCode;
-  if (!response.ok || data.errorCode) {
-    throw new Error(message || `Cloudflare Realtime API 请求失败：HTTP ${response.status}`);
-  }
-  return data;
-}
-
 function createPeerConnection(onState: (peer: RTCPeerConnection) => void) {
   const peer = new RTCPeerConnection({
     iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
@@ -257,176 +118,6 @@ function createPeerConnection(onState: (peer: RTCPeerConnection) => void) {
   peer.addEventListener("signalingstatechange", notify);
   peer.addEventListener("icegatheringstatechange", notify);
   return peer;
-}
-
-async function createCallsSession(credentials: Credentials, peerConnection: RTCPeerConnection): Promise<CallsSession> {
-  const response = await callsFetch(credentials, "/sessions/new", { method: "POST" });
-  if (!response.sessionId) throw new Error("Cloudflare 没有返回 sessionId。");
-  return { id: response.sessionId, peerConnection };
-}
-
-async function establishDataChannelTransport(credentials: Credentials, session: CallsSession) {
-  const bootstrapChannel = session.peerConnection.createDataChannel("server-events", { negotiated: false });
-  bootstrapChannel.addEventListener("message", () => undefined);
-
-  const offer = await session.peerConnection.createOffer();
-  await session.peerConnection.setLocalDescription(offer);
-
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/establish`, {
-    method: "POST",
-    body: JSON.stringify({
-      dataChannel: {
-        location: "remote",
-        dataChannelName: "server-events",
-      },
-      sessionDescription: {
-        type: "offer",
-        sdp: offer.sdp,
-      },
-    }),
-  });
-
-  if (!response.sessionDescription) {
-    throw new Error("Cloudflare 没有返回 datachannel transport 的 SDP。");
-  }
-
-  if (response.requiresImmediateRenegotiation) {
-    await session.peerConnection.setRemoteDescription(response.sessionDescription);
-    const answer = await session.peerConnection.createAnswer();
-    await session.peerConnection.setLocalDescription(answer);
-    await callsFetch(credentials, `/sessions/${session.id}/renegotiate`, {
-      method: "PUT",
-      body: JSON.stringify({
-        sessionDescription: {
-          type: "answer",
-          sdp: answer.sdp,
-        },
-      }),
-    });
-  } else {
-    await session.peerConnection.setRemoteDescription(response.sessionDescription);
-  }
-}
-
-function getDataChannelId(response: CallsApiResponse) {
-  const dataChannels = response.dataChannels ?? response.datachannels ?? [];
-  const id = dataChannels[0]?.id ?? response.dataChannel?.id;
-  if (typeof id !== "number") {
-    const error = dataChannels[0]?.errorDescription || dataChannels[0]?.errorCode;
-    throw new Error(error || "Cloudflare 没有返回 DataChannel id。");
-  }
-  return id;
-}
-
-async function createPublisherChannel(credentials: Credentials, session: CallsSession, dataChannelName: string) {
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/new`, {
-    method: "POST",
-    body: JSON.stringify({
-      dataChannels: [
-        {
-          location: "local",
-          dataChannelName,
-        },
-      ],
-    }),
-  });
-  return session.peerConnection.createDataChannel(dataChannelName, {
-    negotiated: true,
-    id: getDataChannelId(response),
-  });
-}
-
-async function createSubscriberChannel(
-  credentials: Credentials,
-  session: CallsSession,
-  publisherSessionId: string,
-  dataChannelName: string,
-) {
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/new`, {
-    method: "POST",
-    body: JSON.stringify({
-      dataChannels: [
-        {
-          location: "remote",
-          sessionId: publisherSessionId,
-          dataChannelName,
-          waitForAck: true,
-        },
-      ],
-    }),
-  });
-  return session.peerConnection.createDataChannel(`${dataChannelName}-subscribed`, {
-    negotiated: true,
-    id: getDataChannelId(response),
-  });
-}
-
-function waitForDataChannelOpen(channel: RTCDataChannel, peer: RTCPeerConnection, timeoutMs = channelOpenTimeoutMs) {
-  if (channel.readyState === "open") return Promise.resolve();
-
-  return new Promise<void>((resolve, reject) => {
-    let finished = false;
-    const done = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(timer);
-      channel.removeEventListener("open", onOpen);
-      channel.removeEventListener("close", onClose);
-      channel.removeEventListener("error", onError);
-      peer.removeEventListener("connectionstatechange", onPeerState);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onOpen = () => done();
-    const onClose = () => done(new Error("DataChannel 已关闭，连接没有建立。"));
-    const onError = () => done(new Error("DataChannel 发生错误，连接没有建立。"));
-    const onPeerState = () => {
-      if (peer.connectionState === "failed" || peer.connectionState === "closed") {
-        done(new Error(`PeerConnection 连接失败：${peer.connectionState}。`));
-      }
-    };
-    const timer = window.setTimeout(() => {
-      done(new Error(`DataChannel 没有打开。当前状态：peer=${peer.connectionState}，channel=${channel.readyState}。`));
-    }, timeoutMs);
-
-    channel.addEventListener("open", onOpen);
-    channel.addEventListener("close", onClose);
-    channel.addEventListener("error", onError);
-    peer.addEventListener("connectionstatechange", onPeerState);
-    onPeerState();
-  });
-}
-
-function waitForBuffer(channel: RTCDataChannel, onWait?: () => void) {
-  if (channel.readyState !== "open") return Promise.reject(new Error("DataChannel 已关闭，发送已中断。"));
-  if (channel.bufferedAmount <= highWaterMark) return Promise.resolve();
-
-  onWait?.();
-  return new Promise<void>((resolve, reject) => {
-    let finished = false;
-    const previousThreshold = channel.bufferedAmountLowThreshold;
-    const done = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      channel.removeEventListener("bufferedamountlow", onLow);
-      channel.removeEventListener("close", onClose);
-      channel.removeEventListener("error", onError);
-      channel.bufferedAmountLowThreshold = previousThreshold;
-      if (error) reject(error);
-      else resolve();
-    };
-    const onLow = () => {
-      if (channel.bufferedAmount <= lowWaterMark) done();
-    };
-    const onClose = () => done(new Error("DataChannel 已关闭，发送已中断。"));
-    const onError = () => done(new Error("DataChannel 发生错误，发送已中断。"));
-
-    channel.bufferedAmountLowThreshold = lowWaterMark;
-    channel.addEventListener("bufferedamountlow", onLow);
-    channel.addEventListener("close", onClose);
-    channel.addEventListener("error", onError);
-    onLow();
-  });
 }
 
 export function createSfuPage() {
@@ -472,7 +163,7 @@ export function createSfuPage() {
   const [isSending, setIsSending] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
 
-  const credentials = useMemo<Credentials>(() => ({ appId, appToken }), [appId, appToken]);
+  const credentials = useMemo<SfuCredentials>(() => ({ appId, appToken }), [appId, appToken]);
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
 
@@ -623,7 +314,7 @@ export function createSfuPage() {
       setSenderStatus("正在向 SFU 注册本地 DataChannel...");
       const channel = await createPublisherChannel(credentials, session, channelName);
       attachSenderChannel(channel);
-      await waitForDataChannelOpen(channel, peer);
+      await waitForDataChannelOpen(channel, peer, { timeoutMs: channelOpenTimeoutMs });
 
       const code = await encodeConnectionCode({
         kind: "cloudflare-sfu-file-v1",
@@ -675,7 +366,7 @@ export function createSfuPage() {
       setReceiverStatus("正在订阅发送方 DataChannel...");
       const channel = await createSubscriberChannel(credentials, session, code.publisherSessionId, code.dataChannelName);
       attachReceiverChannel(channel);
-      await waitForDataChannelOpen(channel, peer);
+      await waitForDataChannelOpen(channel, peer, { timeoutMs: channelOpenTimeoutMs });
       setReceiverStatus("已订阅 SFU DataChannel，等待发送方传输文件。");
     } catch (error) {
       setReceiverError(error instanceof Error ? error.message : "订阅 SFU DataChannel 失败。");
@@ -716,7 +407,7 @@ export function createSfuPage() {
 
       while (offset < file.size) {
         const buffer = await file.slice(offset, offset + chunkSize).arrayBuffer();
-        await waitForBuffer(channel, () => publishProgress(offset));
+        await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
         channel.send(buffer);
         offset += buffer.byteLength;
         const now = performance.now();
@@ -726,7 +417,7 @@ export function createSfuPage() {
       }
 
       const done: TransferDone = { kind: "done" };
-      await waitForBuffer(channel, () => publishProgress(offset));
+      await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
       channel.send(JSON.stringify(done));
       setSentBytes(file.size);
       setSenderProgress(100);

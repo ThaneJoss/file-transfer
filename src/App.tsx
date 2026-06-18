@@ -1,53 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { AppShell, routes } from "./layout/AppShell";
-import type { AppRoute, AppRouteId } from "./layout/AppShell";
+import { AppShell } from "./layout/AppShell";
 import DirectPage from "./pages/DirectPage";
 import R2Page from "./pages/R2Page";
 import SfuPage from "./pages/SfuPage";
 import STUNPage from "./pages/STUNPage";
 import TURNPage from "./pages/TURNPage";
 
-function routeFromPath(pathname: string): AppRoute {
-  if (pathname === "/") return routes[0];
-  return routes.find((route) => route.path === pathname) ?? routes[0];
-}
-
 export default function App() {
-  const [activeRoute, setActiveRoute] = useState<AppRouteId>(() => routeFromPath(window.location.pathname).id);
-
-  useEffect(() => {
-    const onPopState = () => setActiveRoute(routeFromPath(window.location.pathname).id);
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-
-  const handleNavigate = useCallback((route: AppRoute) => {
-    if (window.location.pathname !== route.path) {
-      window.history.pushState({}, "", route.path);
-    }
-    setActiveRoute(route.id);
-  }, []);
-
-  const page = useMemo(() => {
-    switch (activeRoute) {
-      case "stun":
-        return <STUNPage />;
-      case "turn":
-        return <TURNPage />;
-      case "sfu":
-        return <SfuPage />;
-      case "r2":
-        return <R2Page />;
-      case "direct":
-      default:
-        return <DirectPage />;
-    }
-  }, [activeRoute]);
-
   return (
-    <AppShell activeRoute={activeRoute} onNavigate={handleNavigate}>
-      {page}
-    </AppShell>
+    <BrowserRouter>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<Navigate to="/direct" replace />} />
+          <Route path="/direct" element={<DirectPage />} />
+          <Route path="/stun" element={<STUNPage />} />
+          <Route path="/turn" element={<TURNPage />} />
+          <Route path="/sfu" element={<SfuPage />} />
+          <Route path="/r2" element={<R2Page />} />
+          <Route path="*" element={<Navigate to="/direct" replace />} />
+        </Routes>
+      </AppShell>
+    </BrowserRouter>
   );
 }
