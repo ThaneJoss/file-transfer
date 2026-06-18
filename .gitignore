@@ -6,3 +6,7 @@ dist
 .env.*
 !.env.example
 *.tsbuildinfo
+playwright/.auth/
+test-results/
+playwright-report/
+coverage/
