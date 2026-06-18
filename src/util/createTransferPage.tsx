@@ -31,6 +31,7 @@ import {
   ReceivedFilesPanel,
   RoleOption,
   StatusPanel,
+  StatusPanelHeader,
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
@@ -143,7 +144,7 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
   },
   turn: {
     connectionType: "TURN Relay DataChannel",
-    description: "强制通过 TURN relay 中继建立 DataChannel，适合双方网络无法直连的场景。",
+    description: "TURN relay 中继 DataChannel，适合无法直连的网络。",
     signalKind: "turn-webrtc-signal",
     rtcConfig: { iceServers: [], iceTransportPolicy: "relay" },
     initialSenderStatus: "选择文件后通过 TURN 生成 Offer。",
@@ -926,6 +927,7 @@ export function createTransferPage(variant: TransferVariant) {
 
   function resetSender() {
     closeSenderPeer();
+    setSelectedFile(null);
     setSenderOffer("");
     setSenderAnswerInput("");
     setSenderStatus(config.initialSenderStatus);
@@ -1591,38 +1593,38 @@ export function createTransferPage(variant: TransferVariant) {
         <StatusPanel>
           {statusPanelView === "details" ? (
             <>
-              <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-                  <p className="mt-1 text-[15px] text-[#526c92]">查看当前传输链路、候选地址、通道和文件进度。</p>
-                </div>
-                <SecondaryButton onClick={() => setStatusPanelView("status")}>
-                  <ArrowLeft aria-hidden="true" size={17} />
-                  返回状态
-                </SecondaryButton>
-              </div>
+              <StatusPanelHeader
+                title="连接详情"
+                description="查看当前传输链路、候选地址、通道和文件进度。"
+                action={(
+                  <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                    <ArrowLeft aria-hidden="true" size={17} />
+                    返回状态
+                  </SecondaryButton>
+                )}
+              />
 
               <ConnectionDetails items={details} expanded showHeading={false} />
             </>
           ) : (
             <>
-              <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
-                  <p className="mt-1 text-[15px] text-[#526c92]">{config.description}</p>
-                </div>
-                <SecondaryButton
-                  onClick={() => {
-                    resetSender();
-                    resetReceiver();
-                    setTransferMode(null);
-                    setStatusPanelView("status");
-                  }}
-                >
-                  <RefreshCw aria-hidden="true" size={17} />
-                  重置
-                </SecondaryButton>
-              </div>
+              <StatusPanelHeader
+                title="连接状态"
+                description={config.description}
+                action={(
+                  <SecondaryButton
+                    onClick={() => {
+                      resetSender();
+                      resetReceiver();
+                      setTransferMode(null);
+                      setStatusPanelView("status");
+                    }}
+                  >
+                    <RefreshCw aria-hidden="true" size={17} />
+                    重置
+                  </SecondaryButton>
+                )}
+              />
 
               <TransferSteps steps={transferSteps} />
 
@@ -1735,7 +1737,12 @@ export function createTransferPage(variant: TransferVariant) {
                   description={`粘贴 ${signalPrefix}Offer，生成 Answer`}
                   icon={Download}
                   selected={transferMode === "receive"}
-                  onClick={() => setTransferMode("receive")}
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setSenderProgress(0);
+                    setSentBytes(0);
+                    setTransferMode("receive");
+                  }}
                 />
               </div>
             )}
@@ -1863,11 +1870,27 @@ export function createTransferPage(variant: TransferVariant) {
               inputRef={senderFileInputRef}
               onFileInput={handleFileInput}
               onDrop={handleDrop}
-              ariaLabel="选择发送文件"
+              ariaLabel={transferMode === "send" ? "选择发送文件" : "文件选择状态"}
               title={selectedFile?.name}
-              titleFallback="点击或拖拽文件到此处上传"
-              subtitle={selectedFile ? formatBytes(selectedFile.size) : `选择发送文件后再生成 ${signalPrefix}Offer`}
+              titleFallback={
+                transferMode === "receive"
+                  ? "接收端无需选择文件"
+                  : transferMode === "send"
+                    ? "点击或拖拽文件到此处上传"
+                    : "先选择发送文件角色"
+              }
+              subtitle={
+                transferMode === "receive"
+                  ? "等待发送方通过 DataChannel 传输文件"
+                  : transferMode === "send"
+                    ? selectedFile
+                      ? formatBytes(selectedFile.size)
+                      : `选择发送文件后再生成 ${signalPrefix}Offer`
+                    : "选择左侧发送文件后启用文件选择"
+              }
               onSelect={() => senderFileInputRef.current?.click()}
+              disabled={transferMode !== "send"}
+              icon={transferMode === "receive" ? Download : UploadCloud}
             />
           </UploadPanel>
         </MainPanelGrid>

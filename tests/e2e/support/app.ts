@@ -384,6 +384,7 @@ export async function getLayoutMetrics(page: Page) {
       pageSlot: rectFor("[data-testid='page-slot']", "main > :nth-child(2)"),
       workspace: rectFor("[data-testid='transfer-page-root']"),
       statusPanel: rectFor("[data-testid='status-panel']"),
+      statusSteps: rectFor("[data-testid='transfer-steps']"),
       targetPanel: rectFor("[data-testid='target-panel']"),
       uploadPanel: rectFor("[data-testid='upload-panel']"),
       fileListPanel: rectFor("[data-testid='file-list-panel']"),
@@ -416,6 +417,7 @@ export function expectRectStable(
     | "pageSlot"
     | "workspace"
     | "statusPanel"
+    | "statusSteps"
     | "targetPanel"
     | "uploadPanel"
     | "fileListPanel"
@@ -607,6 +609,17 @@ export async function expectStatusPanelUsesFullLeftRail(page: Page) {
     }
     if (!panel.querySelector(".connection-details-more")) {
       failures.push("status panel is missing details view trigger");
+    }
+
+    const description = panel.querySelector(".status-panel-description");
+    if (description instanceof HTMLElement) {
+      const style = getComputedStyle(description);
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      if (lineHeight > 0 && description.clientHeight > lineHeight * 2 + tolerance) {
+        failures.push("status description uses more than two lines");
+      }
+    } else {
+      failures.push("status panel is missing stable description");
     }
 
     return failures;

@@ -47,6 +47,26 @@ export function StatusPanel({ children }: { children: ReactNode }) {
   );
 }
 
+export function StatusPanelHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action: ReactNode;
+}) {
+  return (
+    <div className="status-panel-header">
+      <div className="status-panel-heading">
+        <h2 className="text-[22px] font-extrabold leading-tight text-[#061b3a]">{title}</h2>
+        <p className="status-panel-description" title={description}>{description}</p>
+      </div>
+      <div className="shrink-0">{action}</div>
+    </div>
+  );
+}
+
 export function MainPanelGrid({ children }: { children: ReactNode }) {
   return (
     <div className="transfer-main-panel-grid">
@@ -81,7 +101,7 @@ export function FilesPanel({ children }: { children: ReactNode }) {
 
 export function TransferSteps({ steps }: { steps: TransferStepItem[] }) {
   return (
-    <div className="relative grid shrink-0 grid-cols-4 items-start max-[620px]:grid-cols-1 max-[620px]:gap-5">
+    <div className="relative grid shrink-0 grid-cols-4 items-start max-[620px]:grid-cols-1 max-[620px]:gap-5" data-testid="transfer-steps">
       <div className="absolute left-[12.5%] right-[12.5%] top-[26px] grid grid-cols-3 max-[620px]:hidden">
         {steps.slice(0, -1).map((step) => (
           <span
@@ -223,6 +243,9 @@ export function FilePickerPanel({
   titleFallback,
   subtitle,
   onSelect,
+  disabled = false,
+  icon: Icon = UploadCloud,
+  actionLabel = "选择文件",
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   onFileInput: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -232,18 +255,27 @@ export function FilePickerPanel({
   titleFallback: string;
   subtitle: string;
   onSelect: () => void;
+  disabled?: boolean;
+  icon?: LucideIcon;
+  actionLabel?: string;
 }) {
   return (
     <div
-      className="file-picker-panel"
-      onDrop={onDrop}
+      className={`file-picker-panel ${disabled ? "file-picker-panel-muted" : ""}`}
+      onDrop={(event) => {
+        event.preventDefault();
+        if (!disabled) onDrop(event);
+      }}
       onDragOver={(event) => event.preventDefault()}
       aria-label={ariaLabel}
+      aria-disabled={disabled || undefined}
       data-testid="file-upload-dropzone"
     >
-      <input ref={inputRef} className="hidden" type="file" onChange={onFileInput} />
-      <div className="mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl bg-[#1677ff] text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px]">
-        <UploadCloud aria-hidden="true" size={46} />
+      <input ref={inputRef} className="hidden" type="file" onChange={onFileInput} disabled={disabled} />
+      <div className={`mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px] ${
+        disabled ? "bg-[#8da1bc]" : "bg-[#1677ff]"
+      }`}>
+        <Icon aria-hidden="true" size={46} />
       </div>
       <strong
         className="block h-[30px] w-full max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-[20px] font-extrabold leading-[30px] text-[#071b3a]"
@@ -252,12 +284,14 @@ export function FilePickerPanel({
         {title || titleFallback}
       </strong>
       <span className="mt-1 text-[14px] text-[#526c92]">{subtitle}</span>
-      <div className="mt-5 flex flex-wrap justify-center gap-3">
-        <PrimaryButton onClick={onSelect}>
-          <HardDrive aria-hidden="true" size={17} />
-          选择文件
-        </PrimaryButton>
-      </div>
+      {!disabled && (
+        <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <PrimaryButton onClick={onSelect}>
+            <HardDrive aria-hidden="true" size={17} />
+            {actionLabel}
+          </PrimaryButton>
+        </div>
+      )}
     </div>
   );
 }

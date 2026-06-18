@@ -100,8 +100,8 @@ test.describe("SFU page", () => {
   test("creates a mocked subscriber and rejects malformed connection codes", async ({ page }) => {
     await mockSfuSuccess(page);
     await openRoute(page, "sfu");
-    await fillSfuCredentials(page);
     await page.getByRole("button", { name: /接收文件/ }).click();
+    await fillSfuCredentials(page);
     await page.getByLabel("发送方 SFU 连接码").fill("not-json");
     await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
     await expect(page.getByRole("alert")).toContainText(/Unexpected token|SFU 连接码格式不正确/);
@@ -129,8 +129,8 @@ test.describe("SFU page", () => {
         });
       });
       await openRoute(page, "sfu");
-      await fillSfuCredentials(page);
       await page.getByRole("button", { name: /发送文件/ }).click();
+      await fillSfuCredentials(page);
       await selectFile(page, "sfu-error.txt");
       await page.getByRole("button", { name: /创建发布通道/ }).click();
       await expect(page.getByText(`mock ${status}`)).toBeVisible();
@@ -141,8 +141,8 @@ test.describe("SFU page", () => {
   test("reports missing API fields and cleans PeerConnection resources on unmount", async ({ page }) => {
     await page.route("https://rtc.live.cloudflare.com/v1/apps/fake-app-id/**", (route) => route.fulfill({ contentType: "application/json", body: "{}" }));
     await openRoute(page, "sfu");
-    await fillSfuCredentials(page);
     await page.getByRole("button", { name: /发送文件/ }).click();
+    await fillSfuCredentials(page);
     await selectFile(page, "sfu-missing.txt");
     await page.getByRole("button", { name: /创建发布通道/ }).click();
     await expect(page.getByText(/没有返回 sessionId/)).toBeVisible();
@@ -154,8 +154,8 @@ test.describe("SFU page", () => {
   test("reports network interruption", async ({ page }) => {
     await page.route("https://rtc.live.cloudflare.com/v1/apps/fake-app-id/**", (route) => route.abort("failed"));
     await openRoute(page, "sfu");
-    await fillSfuCredentials(page);
     await page.getByRole("button", { name: /发送文件/ }).click();
+    await fillSfuCredentials(page);
     await selectFile(page, "sfu-network.txt");
     await page.getByRole("button", { name: /创建发布通道/ }).click();
     await expect(page.getByText(/Failed to fetch|创建 SFU 发布通道失败/)).toBeVisible();
