@@ -175,16 +175,24 @@ button {
   flex-direction: column;
 }
 
-.connection-details-secondary {
-  min-width: 0;
-  margin-top: 0.75rem;
+.connection-details-expanded {
+  overflow: hidden;
 }
 
-.connection-details-secondary > summary {
-  display: flex;
+.connection-details-expanded > .grid {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.25rem;
+  scrollbar-gutter: stable;
+}
+
+.connection-details-more {
+  display: inline-flex;
   min-height: 38px;
+  width: 100%;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  margin-top: 0.75rem;
   border: 1px solid #d7e5f6;
   border-radius: 0.75rem;
   background: rgba(255, 255, 255, 0.72);
@@ -192,30 +200,6 @@ button {
   color: #1677ff;
   font-size: 0.9rem;
   font-weight: 800;
-  list-style: none;
-  cursor: pointer;
-}
-
-.connection-details-secondary > summary::-webkit-details-marker {
-  display: none;
-}
-
-.connection-details-secondary > summary::after {
-  content: "+";
-  color: #526c92;
-  font-weight: 900;
-}
-
-.connection-details-secondary[open] > summary::after {
-  content: "-";
-}
-
-.connection-details-secondary[open] > .grid {
-  max-height: min(34dvh, 280px);
-  margin-top: 0.75rem;
-  overflow: auto;
-  padding-right: 0.25rem;
-  scrollbar-gutter: stable;
 }
 
 @media (max-width: 1179px) {
@@ -288,8 +272,7 @@ button {
     flex: 0 1 auto;
   }
 
-  .connection-details-secondary[open] > .grid {
-    max-height: none;
+  .connection-details-expanded > .grid {
     overflow: visible;
     padding-right: 0;
     scrollbar-gutter: auto;

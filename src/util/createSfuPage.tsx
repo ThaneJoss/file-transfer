@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Check,
   Circle,
   Copy,
@@ -162,6 +163,7 @@ export function createSfuPage() {
   const [isCreatingSubscriber, setIsCreatingSubscriber] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
+  const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
 
   const credentials = useMemo<SfuCredentials>(() => ({ appId, appToken }), [appId, appToken]);
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
@@ -217,6 +219,7 @@ export function createSfuPage() {
   function resetAll() {
     closeSenderSession();
     closeReceiverSession();
+    setStatusPanelView("status");
     setMode(null);
     setConnectionCode("");
     setReceiverCodeInput("");
@@ -542,22 +545,41 @@ export function createSfuPage() {
   return (
     <TransferPageGrid>
       <StatusPanel>
-        <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-          <div>
-            <h2 className="text-[22px] font-extrabold text-[#061b3a]">SFU 连接状态</h2>
-            <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare Realtime SFU 单向 DataChannel 分发文件。</p>
-          </div>
-          <SecondaryButton onClick={resetAll}>
-            <RefreshCw aria-hidden="true" size={17} />
-            重置
-          </SecondaryButton>
-        </div>
+        {statusPanelView === "details" ? (
+          <>
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
+                <p className="mt-1 text-[15px] text-[#526c92]">查看 SFU 会话、DataChannel、Peer 状态和文件进度。</p>
+              </div>
+              <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                <ArrowLeft aria-hidden="true" size={17} />
+                返回状态
+              </SecondaryButton>
+            </div>
 
-        <TransferSteps steps={steps} />
+            <ConnectionDetails items={details} expanded showHeading={false} />
+          </>
+        ) : (
+          <>
+            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+              <div>
+                <h2 className="text-[22px] font-extrabold text-[#061b3a]">SFU 连接状态</h2>
+                <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare Realtime SFU 单向 DataChannel 分发文件。</p>
+              </div>
+              <SecondaryButton onClick={resetAll}>
+                <RefreshCw aria-hidden="true" size={17} />
+                重置
+              </SecondaryButton>
+            </div>
 
-        <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+            <TransferSteps steps={steps} />
 
-        <ConnectionDetails items={details} />
+            <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+
+            <ConnectionDetails items={details} onShowMore={() => setStatusPanelView("details")} />
+          </>
+        )}
       </StatusPanel>
 
       <MainPanelGrid>

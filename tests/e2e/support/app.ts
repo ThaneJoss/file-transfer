@@ -602,14 +602,28 @@ export async function expectStatusPanelUsesFullLeftRail(page: Page) {
       failures.push("status panel content overflows its default viewport");
     }
 
-    const secondaryDetails = panel.querySelector(".connection-details-secondary");
-    if (secondaryDetails?.hasAttribute("open")) {
-      failures.push("secondary connection details should be collapsed by default");
+    if (panel.querySelector(".connection-details-expanded")) {
+      failures.push("status panel should show summary view by default");
+    }
+    if (!panel.querySelector(".connection-details-more")) {
+      failures.push("status panel is missing details view trigger");
     }
 
     return failures;
   });
   expect(report).toEqual([]);
+}
+
+export async function expectStatusPanelDetailsSwitches(page: Page) {
+  const statusPanel = page.getByTestId("status-panel");
+  const moreButton = statusPanel.getByRole("button", { name: "更多详情" });
+  await expect(moreButton).toBeVisible();
+  await moreButton.click();
+  await expect(statusPanel.getByRole("heading", { name: "连接详情" })).toBeVisible();
+  await expect(statusPanel.getByRole("button", { name: "返回状态" })).toBeVisible();
+  await expect(statusPanel.getByRole("button", { name: "更多详情" })).toHaveCount(0);
+  await statusPanel.getByRole("button", { name: "返回状态" }).click();
+  await expect(statusPanel.getByRole("button", { name: "更多详情" })).toBeVisible();
 }
 
 declare global {

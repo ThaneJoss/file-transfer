@@ -127,22 +127,27 @@ export function MetricGrid({ items }: { items: MetricItem[] }) {
 export function ConnectionDetails({
   items,
   primaryCount = 4,
+  expanded = false,
+  showHeading = true,
+  onShowMore,
 }: {
   items: MetricItem[];
   primaryCount?: number;
+  expanded?: boolean;
+  showHeading?: boolean;
+  onShowMore?: () => void;
 }) {
-  const primaryItems = items.slice(0, primaryCount);
-  const secondaryItems = items.slice(primaryCount);
+  const visibleItems = expanded ? items : items.slice(0, primaryCount);
+  const hasMoreItems = items.length > primaryCount;
 
   return (
-    <section className="connection-details">
-      <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-      <MetricGrid items={primaryItems} />
-      {secondaryItems.length > 0 && (
-        <details className="connection-details-secondary">
-          <summary>更多详情</summary>
-          <MetricGrid items={secondaryItems} />
-        </details>
+    <section className={`connection-details ${expanded ? "connection-details-expanded" : ""}`}>
+      {showHeading && <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>}
+      <MetricGrid items={visibleItems} />
+      {!expanded && hasMoreItems && onShowMore && (
+        <button className="connection-details-more" type="button" onClick={onShowMore}>
+          更多详情
+        </button>
       )}
     </section>
   );

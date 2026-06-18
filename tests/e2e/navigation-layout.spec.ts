@@ -8,6 +8,7 @@ import {
   expectNoLayoutOverflow,
   expectRectStable,
   expectSharedPanelsVisible,
+  expectStatusPanelDetailsSwitches,
   expectSliderAligned,
   expectStatusPanelUsesFullLeftRail,
   getLayoutMetrics,
@@ -69,6 +70,7 @@ for (const viewport of viewports) {
         await expectSliderAligned(page);
         await expectNoLayoutOverflow(page);
         await expectStatusPanelUsesFullLeftRail(page);
+        await expectStatusPanelDetailsSwitches(page);
       }
     });
   });

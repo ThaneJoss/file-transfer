@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Check,
   Circle,
   Copy,
@@ -702,6 +703,7 @@ export function createTransferPage(variant: TransferVariant) {
   const [incomingMeta, setIncomingMeta] = useState<TransferMeta | null>(null);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [transferMode, setTransferMode] = useState<TransferMode>(null);
+  const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
   const [senderHandshakeStage, setSenderHandshakeStage] = useState<SenderHandshakeStage>("offer");
   const [isStunProbing, setIsStunProbing] = useState(false);
   const [stunProbeStatus, setStunProbeStatus] = useState("等待 probe");
@@ -1587,28 +1589,48 @@ export function createTransferPage(variant: TransferVariant) {
   return (
     <TransferPageGrid>
         <StatusPanel>
-          <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-            <div>
-              <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
-              <p className="mt-1 text-[15px] text-[#526c92]">{config.description}</p>
-            </div>
-            <SecondaryButton
-              onClick={() => {
-                resetSender();
-                resetReceiver();
-                setTransferMode(null);
-              }}
-            >
-              <RefreshCw aria-hidden="true" size={17} />
-              重置
-            </SecondaryButton>
-          </div>
+          {statusPanelView === "details" ? (
+            <>
+              <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
+                  <p className="mt-1 text-[15px] text-[#526c92]">查看当前传输链路、候选地址、通道和文件进度。</p>
+                </div>
+                <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                  <ArrowLeft aria-hidden="true" size={17} />
+                  返回状态
+                </SecondaryButton>
+              </div>
 
-          <TransferSteps steps={transferSteps} />
+              <ConnectionDetails items={details} expanded showHeading={false} />
+            </>
+          ) : (
+            <>
+              <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接状态</h2>
+                  <p className="mt-1 text-[15px] text-[#526c92]">{config.description}</p>
+                </div>
+                <SecondaryButton
+                  onClick={() => {
+                    resetSender();
+                    resetReceiver();
+                    setTransferMode(null);
+                    setStatusPanelView("status");
+                  }}
+                >
+                  <RefreshCw aria-hidden="true" size={17} />
+                  重置
+                </SecondaryButton>
+              </div>
 
-          <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+              <TransferSteps steps={transferSteps} />
 
-          <ConnectionDetails items={details} />
+              <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
+
+              <ConnectionDetails items={details} onShowMore={() => setStatusPanelView("details")} />
+            </>
+          )}
         </StatusPanel>
 
         <MainPanelGrid>
