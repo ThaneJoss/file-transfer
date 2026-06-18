@@ -241,10 +241,11 @@ button {
   }
 
   .transfer-page-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-    grid-auto-rows: auto;
-    align-items: start;
+    display: block;
+  }
+
+  .transfer-main-panel-grid {
+    display: block;
   }
 
   .transfer-status-panel,
@@ -259,6 +260,7 @@ button {
 
   .transfer-panel {
     height: auto;
+    margin-bottom: var(--transfer-gap);
     overflow: visible;
   }
 
