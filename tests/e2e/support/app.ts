@@ -11,6 +11,57 @@ export const routePath: Record<RouteId, string> = {
   r2: "/r2",
 };
 
+export type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal" | "turn-webrtc-signal";
+export type CandidateType = "host" | "srflx" | "relay";
+
+const testCandidateByType: Record<CandidateType, string> = {
+  host: "candidate:1 1 udp 2122260223 192.168.0.2 52102 typ host",
+  srflx: "candidate:2 1 udp 1686052607 203.0.113.10 42102 typ srflx raddr 192.168.0.2 rport 52102",
+  relay: "candidate:3 1 udp 41819903 198.51.100.20 3478 typ relay raddr 0.0.0.0 rport 0",
+};
+
+export function rawSignalText({
+  kind,
+  role,
+  descriptionType,
+  candidateTypes = ["host"],
+}: {
+  kind: SignalKind;
+  role: "offer" | "answer";
+  descriptionType: RTCSdpType;
+  candidateTypes?: CandidateType[];
+}) {
+  const candidates = candidateTypes.map((type) => testCandidateByType[type]);
+  const sdp = [
+    "v=0",
+    "o=- 0 0 IN IP4 127.0.0.1",
+    "s=-",
+    "t=0 0",
+    "m=application 9 UDP/DTLS/SCTP webrtc-datachannel",
+    "c=IN IP4 0.0.0.0",
+    "a=mid:0",
+    "a=sctp-port:5000",
+    ...candidates.map((candidate) => `a=${candidate}`),
+    "a=end-of-candidates",
+    "",
+  ].join("\r\n");
+
+  return JSON.stringify({
+    kind,
+    role,
+    description: {
+      type: descriptionType,
+      sdp,
+    },
+    candidates: candidates.map((candidate) => ({
+      candidate,
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+    })),
+    createdAt: Date.now(),
+  });
+}
+
 export function collectConsoleErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -41,8 +92,15 @@ export function withoutExpectedNetworkDiagnostics(errors: string[]) {
   );
 }
 
-export async function installAppMocks(page: Page, options: { candidateTypes?: Array<"host" | "srflx" | "relay"> } = {}) {
-  await page.addInitScript(({ candidateTypes }) => {
+export async function installAppMocks(
+  page: Page,
+  options: {
+    candidateTypes?: Array<"host" | "srflx" | "relay">;
+    dataChannelState?: RTCDataChannelState;
+    dataChannelFailure?: "close" | "error";
+  } = {},
+) {
+  await page.addInitScript(({ candidateTypes, dataChannelState, dataChannelFailure }) => {
     const selectedTypes = candidateTypes.length ? candidateTypes : ["host", "srflx", "relay"];
     const candidateByType: Record<string, string> = {
       host: "candidate:1 1 udp 2122260223 192.168.0.2 52102 typ host",
@@ -70,13 +128,18 @@ export async function installAppMocks(page: Page, options: { candidateTypes?: Ar
       binaryType: BinaryType = "arraybuffer";
       bufferedAmount = 0;
       bufferedAmountLowThreshold = 0;
-      readyState: RTCDataChannelState = "open";
+      readyState: RTCDataChannelState = dataChannelState;
 
       constructor(public label: string) {
         super();
       }
 
-      send(_data: unknown) {
+      send(data: unknown) {
+        window.__appTest.rtc.sentPayloads.push(
+          data instanceof ArrayBuffer
+            ? { kind: "arrayBuffer", byteLength: data.byteLength }
+            : { kind: "text", value: String(data) },
+        );
         this.bufferedAmount = 0;
       }
 
@@ -112,6 +175,7 @@ export async function installAppMocks(page: Page, options: { candidateTypes?: Ar
       createDataChannel(label: string) {
         const channel = new FakeDataChannel(label) as unknown as RTCDataChannel;
         window.__appTest.rtc.createdChannels += 1;
+        window.__appTest.rtc.channels.push(channel as unknown as FakeDataChannel);
         return channel;
       }
 
@@ -141,10 +205,26 @@ export async function installAppMocks(page: Page, options: { candidateTypes?: Ar
 
       async setRemoteDescription(description: RTCSessionDescriptionInit) {
         this.remoteDescription = description;
-        this.connectionState = "connected";
-        this.iceConnectionState = "connected";
+        this.connectionState = dataChannelFailure ? "connecting" : "connected";
+        this.iceConnectionState = dataChannelFailure ? "checking" : "connected";
         this.dispatchEvent(new Event("connectionstatechange"));
         this.dispatchEvent(new Event("iceconnectionstatechange"));
+        if (dataChannelFailure) {
+          window.setTimeout(() => {
+            for (const channel of window.__appTest.rtc.channels) {
+              if (dataChannelFailure === "close") channel.close();
+              else channel.dispatchEvent(new Event("error"));
+            }
+          }, 0);
+        } else if (dataChannelState !== "open") {
+          window.setTimeout(() => {
+            for (const channel of window.__appTest.rtc.channels) {
+              if (channel.readyState !== "connecting") continue;
+              channel.readyState = "open";
+              channel.dispatchEvent(new Event("open"));
+            }
+          }, 0);
+        }
       }
 
       async addIceCandidate() {
@@ -207,9 +287,11 @@ export async function installAppMocks(page: Page, options: { candidateTypes?: Ar
     window.__appTest = {
       rtc: {
         createdConfigs: [],
+        channels: [],
         createdChannels: 0,
         closedPeers: 0,
         closedChannels: 0,
+        sentPayloads: [],
       },
       objectUrls: {
         created: 0,
@@ -239,7 +321,11 @@ export async function installAppMocks(page: Page, options: { candidateTypes?: Ar
     HTMLAnchorElement.prototype.click = function click() {
       window.__appTest.downloads += 1;
     };
-  }, { candidateTypes: options.candidateTypes ?? ["host", "srflx", "relay"] });
+  }, {
+    candidateTypes: options.candidateTypes ?? ["host", "srflx", "relay"],
+    dataChannelState: options.dataChannelState ?? "open",
+    dataChannelFailure: options.dataChannelFailure ?? null,
+  });
 }
 
 export async function openRoute(page: Page, route: RouteId) {
@@ -342,9 +428,18 @@ declare global {
     __appTest: {
       rtc: {
         createdConfigs: RTCConfiguration[];
+        channels: Array<{
+          readyState: RTCDataChannelState;
+          close: () => void;
+          dispatchEvent: (event: Event) => boolean;
+        }>;
         createdChannels: number;
         closedPeers: number;
         closedChannels: number;
+        sentPayloads: Array<
+          | { kind: "text"; value: string }
+          | { kind: "arrayBuffer"; byteLength: number }
+        >;
       };
       objectUrls: {
         created: number;

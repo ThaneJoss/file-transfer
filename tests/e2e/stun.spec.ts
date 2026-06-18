@@ -8,6 +8,7 @@ import {
   expectSliderAligned,
   installAppMocks,
   openRoute,
+  rawSignalText,
   routePath,
   selectFile,
 } from "./support/app";
@@ -69,5 +70,49 @@ test.describe("STUN page", () => {
     await page.getByLabel(/发送方 STUN Offer/).fill('{"kind":"direct-webrtc-signal"}');
     await page.getByRole("button", { name: /生成 STUN Answer/ }).click();
     await expect(page.getByRole("alert")).toContainText(/连接文本格式不正确|不是 STUN Offer|不是 Offer/);
+  });
+
+  test("rejects host-only STUN answers before applying them to the sender", async ({ page }) => {
+    await installAppMocks(page);
+    await openRoute(page, "stun");
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "stun-host-only.txt");
+    await page.getByRole("button", { name: /生成 STUN Offer/ }).click();
+    await expect(page.getByLabel(/发送方 STUN Offer/)).not.toHaveValue("");
+
+    await page.getByRole("button", { name: /复制 STUN Offer/ }).click();
+    await page.getByLabel(/接收方 STUN Answer/).fill(
+      rawSignalText({
+        kind: "stun-webrtc-signal",
+        role: "answer",
+        descriptionType: "answer",
+        candidateTypes: ["host"],
+      }),
+    );
+    await page.getByRole("button", { name: "发送" }).click();
+
+    await expect(page.getByRole("alert")).toContainText(/没有可用于连接的 srflx\/relay 候选|建立 STUN 连接失败/);
+  });
+
+  test("reports STUN DataChannel errors during connection establishment", async ({ page }) => {
+    await installAppMocks(page, { dataChannelState: "connecting", dataChannelFailure: "error" });
+    await openRoute(page, "stun");
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "stun-channel-error.txt");
+    await page.getByRole("button", { name: /生成 STUN Offer/ }).click();
+    await page.getByRole("button", { name: /复制 STUN Offer/ }).click();
+    await page.getByLabel(/接收方 STUN Answer/).fill(
+      rawSignalText({
+        kind: "stun-webrtc-signal",
+        role: "answer",
+        descriptionType: "answer",
+        candidateTypes: ["srflx"],
+      }),
+    );
+    await page.getByRole("button", { name: "发送" }).click();
+
+    await expect(page.getByRole("alert")).toContainText("DataChannel 发生错误");
+    await page.getByTestId("nav-item-direct").click();
+    await expect(page.evaluate(() => window.__appTest.rtc.closedPeers)).resolves.toBeGreaterThan(0);
   });
 });
