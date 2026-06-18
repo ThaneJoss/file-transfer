@@ -18,6 +18,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
 import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
+import { waitForBuffer, waitForDataChannelOpen } from "../features/transfer/services/dataChannel";
+import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
+import { generateCloudflareTurnIceServers } from "../features/turn/services/cloudflareTurn";
 import {
   ActionPanel,
   FilePickerPanel,
@@ -32,6 +35,9 @@ import {
   UploadPanel,
 } from "../layout/TransferLayout";
 import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
+import { copyText } from "../lib/browser/clipboard";
+import { saveBlob } from "../lib/browser/download";
+import { formatBytes, formatPercent } from "../lib/files/format";
 
 type SignalPayload = {
   kind: SignalKind;
@@ -87,11 +93,6 @@ type SelectedCandidatePair = {
   remote: string;
   state: string;
   rtt: string;
-};
-
-type CloudflareTurnResponse = {
-  iceServers?: unknown;
-  errors?: Array<{ message?: string }>;
 };
 
 type TransferVariantConfig = {
@@ -177,45 +178,8 @@ const defaultTurnKeyId = "";
 const defaultTurnApiToken = "";
 const turnTransports: TurnTransport[] = ["udp", "tcp"];
 
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
-}
-
-function formatPercent(value: number) {
-  return `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
-}
-
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string) {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 async function encodeSignal(payload: SignalPayload) {
-  const json = JSON.stringify(payload);
-  const compression = globalThis.CompressionStream;
-  if (!compression) {
-    return `J1.${bytesToBase64Url(new TextEncoder().encode(json))}`;
-  }
-
-  const stream = new Blob([json]).stream().pipeThrough(new compression("gzip"));
-  const buffer = await new Response(stream).arrayBuffer();
-  return `D1.${bytesToBase64Url(new Uint8Array(buffer))}`;
+  return encodeConnectionPayload(payload);
 }
 
 async function decodeSignal(value: string): Promise<SignalPayload> {
@@ -224,23 +188,8 @@ async function decodeSignal(value: string): Promise<SignalPayload> {
     throw new Error("请先粘贴连接文本。");
   }
 
-  if (trimmed.startsWith("J1.")) {
-    const json = new TextDecoder().decode(base64UrlToBytes(trimmed.slice(3)));
-    return parseSignal(json);
-  }
-
-  if (trimmed.startsWith("D1.")) {
-    const decompression = globalThis.DecompressionStream;
-    if (!decompression) {
-      throw new Error("当前浏览器不能解压 D1 连接文本，请换用最新版 Chrome、Edge 或 Safari。");
-    }
-    const bytes = base64UrlToBytes(trimmed.slice(3));
-    const stream = new Blob([bytes]).stream().pipeThrough(new decompression("gzip"));
-    const json = await new Response(stream).text();
-    return parseSignal(json);
-  }
-
-  return parseSignal(trimmed);
+  const json = await decodeConnectionPayload(trimmed, "当前浏览器不能解压 D1 连接文本，请换用最新版 Chrome、Edge 或 Safari。");
+  return parseSignal(json);
 }
 
 function parseSignal(json: string): SignalPayload {
@@ -648,56 +597,6 @@ function observeIceProbe({
   });
 }
 
-function normalizeIceServers(value: unknown): RTCIceServer[] {
-  if (!Array.isArray(value)) return [];
-
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const server = item as Record<string, unknown>;
-    const urls = server.urls;
-    const normalizedUrls =
-      typeof urls === "string"
-        ? urls
-        : Array.isArray(urls) && urls.every((url) => typeof url === "string")
-          ? urls
-          : null;
-    if (!normalizedUrls) return [];
-
-    return [
-      {
-        urls: normalizedUrls,
-        username: typeof server.username === "string" ? server.username : undefined,
-        credential: typeof server.credential === "string" ? server.credential : undefined,
-      },
-    ];
-  });
-}
-
-async function generateCloudflareTurnIceServers(keyId: string, apiToken: string, ttl: number) {
-  const response = await fetch(
-    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ ttl }),
-    },
-  );
-  const data = (await response.json().catch(() => ({}))) as CloudflareTurnResponse;
-  if (!response.ok) {
-    const message = data.errors?.map((error) => error.message).filter(Boolean).join("；");
-    throw new Error(message || `Cloudflare TURN 凭证生成失败：HTTP ${response.status}`);
-  }
-
-  const iceServers = normalizeIceServers(data.iceServers);
-  if (iceServers.length === 0) {
-    throw new Error("Cloudflare 响应里没有可用的 iceServers。");
-  }
-  return iceServers;
-}
-
 function getStatsValue(stats: RTCStats, key: string) {
   return (stats as unknown as Record<string, unknown>)[key];
 }
@@ -754,125 +653,6 @@ async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<Select
     state: String(getStatsValue(selectedPair, "state") ?? "unknown"),
     rtt: rttText,
   };
-}
-
-function waitForDataChannelOpen(
-  channel: RTCDataChannel,
-  peer: RTCPeerConnection,
-  timeoutMs = channelOpenTimeoutMs,
-  onStatus?: (message: string) => void,
-) {
-  if (channel.readyState === "open") return Promise.resolve();
-
-  return new Promise<void>((resolve, reject) => {
-    let finished = false;
-    const done = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      window.clearTimeout(timer);
-      channel.removeEventListener("open", onOpen);
-      channel.removeEventListener("close", onClose);
-      channel.removeEventListener("error", onError);
-      peer.removeEventListener("iceconnectionstatechange", onIceState);
-      peer.removeEventListener("connectionstatechange", onPeerState);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onOpen = () => done();
-    const onClose = () => done(new Error("DataChannel 已关闭，连接没有建立。"));
-    const onError = () => done(new Error("DataChannel 发生错误，连接没有建立。"));
-    const reportStatus = () => {
-      onStatus?.(`等待 DataChannel 打开：peer=${peer.connectionState}，ice=${peer.iceConnectionState}，gathering=${peer.iceGatheringState}，channel=${channel.readyState}`);
-    };
-    const onIceState = () => {
-      reportStatus();
-      if (peer.iceConnectionState === "failed" || peer.iceConnectionState === "closed") {
-        done(new Error(`ICE 连接失败：${peer.iceConnectionState}。请确认发送方粘贴的是这次生成的 Answer。`));
-      }
-    };
-    const onPeerState = () => {
-      reportStatus();
-      if (peer.connectionState === "failed" || peer.connectionState === "closed") {
-        done(new Error(`PeerConnection 连接失败：${peer.connectionState}。请重新生成并交换同一轮 Offer/Answer。`));
-      }
-    };
-    const timer = window.setTimeout(() => {
-      done(
-        new Error(
-          `DataChannel 没有打开。当前状态：peer=${peer.connectionState}，ice=${peer.iceConnectionState}，channel=${channel.readyState}。请重新生成并交换同一轮完整 Offer/Answer。`,
-        ),
-      );
-    }, timeoutMs);
-    channel.addEventListener("open", onOpen);
-    channel.addEventListener("close", onClose);
-    channel.addEventListener("error", onError);
-    peer.addEventListener("iceconnectionstatechange", onIceState);
-    peer.addEventListener("connectionstatechange", onPeerState);
-    reportStatus();
-  });
-}
-
-function waitForBuffer(channel: RTCDataChannel, onWait?: () => void) {
-  if (channel.readyState !== "open") return Promise.reject(new Error("DataChannel 已关闭，发送已中断。"));
-  if (channel.bufferedAmount <= highWaterMark) return Promise.resolve();
-
-  onWait?.();
-  return new Promise<void>((resolve, reject) => {
-    let finished = false;
-    const previousThreshold = channel.bufferedAmountLowThreshold;
-    const done = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      channel.removeEventListener("bufferedamountlow", onLow);
-      channel.removeEventListener("close", onClose);
-      channel.removeEventListener("error", onError);
-      channel.bufferedAmountLowThreshold = previousThreshold;
-      if (error) reject(error);
-      else resolve();
-    };
-    const onLow = () => {
-      if (channel.bufferedAmount <= lowWaterMark) done();
-    };
-    const onClose = () => done(new Error("DataChannel 已关闭，发送已中断。"));
-    const onError = () => done(new Error("DataChannel 发生错误，发送已中断。"));
-
-    channel.bufferedAmountLowThreshold = lowWaterMark;
-    channel.addEventListener("bufferedamountlow", onLow);
-    channel.addEventListener("close", onClose);
-    channel.addEventListener("error", onError);
-    onLow();
-  });
-}
-
-async function copyText(text: string) {
-  if (!text) return;
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.left = "-9999px";
-  document.body.append(area);
-  area.select();
-  const copied = document.execCommand("copy");
-  area.remove();
-  if (!copied) {
-    throw new Error("复制失败，请手动选中文本复制。");
-  }
-}
-
-function saveBlob(file: ReceivedFile) {
-  const anchor = document.createElement("a");
-  anchor.href = file.url;
-  anchor.download = file.name;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 export function createTransferPage(variant: TransferVariant) {
@@ -1629,8 +1409,11 @@ export function createTransferPage(variant: TransferVariant) {
       await waitForDataChannelOpen(
         channel,
         peer,
-        variant === "turn" ? turnChannelOpenTimeoutMs : channelOpenTimeoutMs,
-        (message) => setSenderStatus(usesIceServer ? `步骤3 ${message}` : message),
+        {
+          timeoutMs: variant === "turn" ? turnChannelOpenTimeoutMs : channelOpenTimeoutMs,
+          includeIceState: true,
+          onStatus: (message) => setSenderStatus(usesIceServer ? `步骤3 ${message}` : message),
+        },
       );
       await updateSelectedCandidatePair("sender", peer);
       await sendSelectedFile();
@@ -1690,7 +1473,7 @@ export function createTransferPage(variant: TransferVariant) {
 
       while (offset < file.size) {
         const buffer = await file.slice(offset, offset + chunkSize).arrayBuffer();
-        await waitForBuffer(channel, () => publishProgress(offset));
+        await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
         channel.send(buffer);
         offset += buffer.byteLength;
         const now = performance.now();
@@ -1700,7 +1483,7 @@ export function createTransferPage(variant: TransferVariant) {
       }
 
       const done: TransferDone = { kind: "done" };
-      await waitForBuffer(channel, () => publishProgress(offset));
+      await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
       channel.send(JSON.stringify(done));
       setSentBytes(file.size);
       setSenderProgress(100);

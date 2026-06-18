@@ -30,7 +30,10 @@ type TransferFileItem = {
 
 export function TransferPageGrid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[auto_minmax(180px,0.5fr)] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]">
+    <div
+      className="grid min-h-full grid-cols-[minmax(340px,0.92fr)_minmax(0,1.85fr)] grid-rows-[auto_auto] gap-[clamp(12px,1.2vw,18px)] max-[1180px]:grid-cols-1 max-[1180px]:grid-rows-none max-[1180px]:gap-[clamp(14px,1.5vw,22px)]"
+      data-testid="transfer-page-root"
+    >
       {children}
     </div>
   );
@@ -38,7 +41,7 @@ export function TransferPageGrid({ children }: { children: ReactNode }) {
 
 export function StatusPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="row-span-2 flex min-h-0 flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:row-span-1 max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+    <Panel className="row-span-2 flex flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:row-span-1 max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
       {children}
     </Panel>
   );
@@ -46,7 +49,7 @@ export function StatusPanel({ children }: { children: ReactNode }) {
 
 export function MainPanelGrid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-0 grid-cols-2 gap-[clamp(12px,1.2vw,18px)] max-[980px]:grid-cols-1 max-[980px]:gap-[clamp(14px,1.5vw,22px)]">
+    <div className="grid grid-cols-2 gap-[clamp(12px,1.2vw,18px)] max-[980px]:grid-cols-1 max-[980px]:gap-[clamp(14px,1.5vw,22px)]">
       {children}
     </div>
   );
@@ -54,7 +57,7 @@ export function MainPanelGrid({ children }: { children: ReactNode }) {
 
 export function ActionPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="min-h-0 overflow-visible p-[clamp(16px,1.45vw,22px)] max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+    <Panel className="overflow-visible p-[clamp(16px,1.45vw,22px)] max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
       {children}
     </Panel>
   );
@@ -62,7 +65,7 @@ export function ActionPanel({ children }: { children: ReactNode }) {
 
 export function UploadPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="min-h-0 overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+    <Panel className="overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
       {children}
     </Panel>
   );
@@ -70,7 +73,7 @@ export function UploadPanel({ children }: { children: ReactNode }) {
 
 export function FilesPanel({ children }: { children: ReactNode }) {
   return (
-    <Panel className="flex min-h-0 flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
+    <Panel className="flex flex-col overflow-hidden p-[clamp(16px,1.45vw,22px)] max-[1180px]:overflow-visible max-[1180px]:p-[clamp(18px,1.8vw,28px)]">
       {children}
     </Panel>
   );

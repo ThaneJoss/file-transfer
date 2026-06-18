@@ -12,10 +12,20 @@ import {
   Server,
   UploadCloud,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
 import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
+import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
+import {
+  buildObjectKey,
+  formatFetchError,
+  presignedR2Url,
+  R2Credentials,
+  r2ObjectUrl,
+  sha256Hex,
+  signedR2Request,
+} from "../features/r2/services/r2Signing";
 import {
   ActionPanel,
   FilePickerPanel,
@@ -30,13 +40,9 @@ import {
   UploadPanel,
 } from "../layout/TransferLayout";
 import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
-
-type R2Credentials = {
-  accountId: string;
-  bucket: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-};
+import { copyText } from "../lib/browser/clipboard";
+import { saveBlob } from "../lib/browser/download";
+import { formatBytes, formatPercent } from "../lib/files/format";
 
 type R2ConnectionCode = {
   kind: "cloudflare-r2-file-v1";
@@ -65,96 +71,15 @@ type ReceivedFile = {
 
 type Mode = "send" | "receive" | null;
 
-const region = "auto";
-const service = "s3";
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
-}
-
-function formatPercent(value: number) {
-  return `${Math.max(0, Math.min(100, value)).toFixed(0)}%`;
-}
-
-function createStableId() {
-  const randomUUID = (globalThis.crypto as (Crypto & { randomUUID?: () => string }) | undefined)?.randomUUID;
-  if (randomUUID) return randomUUID.call(globalThis.crypto);
-
-  const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-}
-
-function bytesToHex(bytes: ArrayBuffer | Uint8Array) {
-  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return Array.from(view, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function arrayBufferFromBytes(bytes: Uint8Array) {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(value: string) {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 async function encodeConnectionCode(payload: R2ConnectionCode) {
-  const json = JSON.stringify(payload);
-  const compression = globalThis.CompressionStream;
-  if (!compression) {
-    return `J1.${bytesToBase64Url(new TextEncoder().encode(json))}`;
-  }
-
-  const stream = new Blob([json]).stream().pipeThrough(new compression("gzip"));
-  const buffer = await new Response(stream).arrayBuffer();
-  return `D1.${bytesToBase64Url(new Uint8Array(buffer))}`;
+  return encodeConnectionPayload(payload);
 }
 
 async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
   const trimmed = value.trim();
   if (!trimmed) throw new Error("请先粘贴 R2 连接码。");
 
-  let json: string;
-  if (trimmed.startsWith("J1.")) {
-    json = new TextDecoder().decode(base64UrlToBytes(trimmed.slice(3)));
-  } else if (trimmed.startsWith("D1.")) {
-    const decompression = globalThis.DecompressionStream;
-    if (!decompression) {
-      throw new Error("当前浏览器不能解压 D1 连接码，请换用最新版 Chrome、Edge 或 Safari。");
-    }
-    const bytes = base64UrlToBytes(trimmed.slice(3));
-    const stream = new Blob([bytes]).stream().pipeThrough(new decompression("gzip"));
-    json = await new Response(stream).text();
-  } else {
-    json = trimmed;
-  }
+  const json = await decodeConnectionPayload(trimmed, "当前浏览器不能解压 D1 连接码，请换用最新版 Chrome、Edge 或 Safari。");
 
   const payload = JSON.parse(json) as R2ConnectionCode;
   if (
@@ -168,242 +93,6 @@ async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
     throw new Error("R2 连接码格式不正确。");
   }
   return payload;
-}
-
-function sanitizeObjectSegment(value: string) {
-  return value
-    .trim()
-    .replace(/[\\/#?]+/g, "-")
-    .replace(/\s+/g, " ")
-    .slice(0, 160);
-}
-
-function normalizePrefix(prefix: string) {
-  return prefix.trim().replace(/^\/+|\/+$/g, "");
-}
-
-function buildObjectKey(prefix: string, file: File) {
-  const safePrefix = normalizePrefix(prefix) || "file-transfer";
-  const date = new Date().toISOString().slice(0, 10);
-  const name = sanitizeObjectSegment(file.name) || "download";
-  return `${safePrefix}/${date}/${createStableId()}-${name}`;
-}
-
-function encodePathSegment(segment: string) {
-  return encodeURIComponent(segment).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-function canonicalUri(bucket: string, objectKey: string) {
-  return `/${encodePathSegment(bucket)}/${objectKey.split("/").map(encodePathSegment).join("/")}`;
-}
-
-function r2Endpoint(accountId: string) {
-  return `https://${accountId.trim()}.r2.cloudflarestorage.com`;
-}
-
-function r2ObjectUrl(credentials: Pick<R2Credentials, "accountId" | "bucket">, objectKey: string) {
-  return `${r2Endpoint(credentials.accountId)}${canonicalUri(credentials.bucket.trim(), objectKey)}`;
-}
-
-function getAmzDates(date = new Date()) {
-  const iso = date.toISOString().replace(/[:-]|\.\d{3}/g, "");
-  return {
-    amzDate: iso,
-    dateStamp: iso.slice(0, 8),
-  };
-}
-
-function encodeQueryValue(value: string) {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-function canonicalQueryString(params: Record<string, string>) {
-  return Object.entries(params)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${encodeQueryValue(key)}=${encodeQueryValue(value)}`)
-    .join("&");
-}
-
-async function sha256Hex(value: string | ArrayBuffer | Uint8Array) {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("R2 签名需要浏览器 Web Crypto，请使用 HTTPS 或 localhost 打开页面。");
-  }
-  const bytes =
-    typeof value === "string"
-      ? new TextEncoder().encode(value)
-      : value instanceof Uint8Array
-        ? value
-        : new Uint8Array(value);
-  return bytesToHex(await crypto.subtle.digest("SHA-256", arrayBufferFromBytes(bytes)));
-}
-
-async function hmac(key: string | Uint8Array, value: string) {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("R2 签名需要浏览器 Web Crypto，请使用 HTTPS 或 localhost 打开页面。");
-  }
-  const rawKey = typeof key === "string" ? new TextEncoder().encode(key) : key;
-  const cryptoKey = await crypto.subtle.importKey("raw", arrayBufferFromBytes(rawKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, arrayBufferFromBytes(new TextEncoder().encode(value))));
-}
-
-async function getSigningKey(secretAccessKey: string, dateStamp: string) {
-  const dateKey = await hmac(`AWS4${secretAccessKey}`, dateStamp);
-  const regionKey = await hmac(dateKey, region);
-  const serviceKey = await hmac(regionKey, service);
-  return hmac(serviceKey, "aws4_request");
-}
-
-async function signedR2Request({
-  credentials,
-  method,
-  objectKey,
-  payloadHash,
-  contentType,
-}: {
-  credentials: R2Credentials;
-  method: "GET" | "HEAD" | "PUT";
-  objectKey: string;
-  payloadHash: string;
-  contentType?: string;
-}) {
-  const accountId = credentials.accountId.trim();
-  const bucket = credentials.bucket.trim();
-  const accessKeyId = credentials.accessKeyId.trim();
-  const secretAccessKey = credentials.secretAccessKey.trim();
-  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error("请填写 Account ID、Bucket、Access Key ID 和 Secret Access Key。");
-  }
-
-  const host = `${accountId}.r2.cloudflarestorage.com`;
-  const { amzDate, dateStamp } = getAmzDates();
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
-  const canonicalHeaders = [
-    `host:${host}`,
-    `x-amz-content-sha256:${payloadHash}`,
-    `x-amz-date:${amzDate}`,
-    "",
-  ].join("\n");
-  const canonicalRequest = [
-    method,
-    canonicalUri(bucket, objectKey),
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join("\n");
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await getSigningKey(secretAccessKey, dateStamp);
-  const signature = bytesToHex(await hmac(signingKey, stringToSign));
-  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const headers = new Headers({
-    Authorization: authorization,
-    "x-amz-content-sha256": payloadHash,
-    "x-amz-date": amzDate,
-  });
-  if (contentType) headers.set("Content-Type", contentType);
-
-  return {
-    url: `${r2Endpoint(accountId)}${canonicalUri(bucket, objectKey)}`,
-    headers,
-  };
-}
-
-async function presignedR2Url({
-  credentials,
-  method,
-  objectKey,
-  expiresIn,
-}: {
-  credentials: R2Credentials;
-  method: "GET" | "HEAD";
-  objectKey: string;
-  expiresIn: number;
-}) {
-  const accountId = credentials.accountId.trim();
-  const bucket = credentials.bucket.trim();
-  const accessKeyId = credentials.accessKeyId.trim();
-  const secretAccessKey = credentials.secretAccessKey.trim();
-  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error("请填写 Account ID、Bucket、Access Key ID 和 Secret Access Key。");
-  }
-  if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
-    throw new Error("预签名下载链接有效期必须是 1 到 604800 秒。");
-  }
-
-  const host = `${accountId}.r2.cloudflarestorage.com`;
-  const { amzDate, dateStamp } = getAmzDates();
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const payloadHash = "UNSIGNED-PAYLOAD";
-  const query = {
-    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
-    "X-Amz-Content-Sha256": payloadHash,
-    "X-Amz-Credential": `${accessKeyId}/${credentialScope}`,
-    "X-Amz-Date": amzDate,
-    "X-Amz-Expires": String(expiresIn),
-    "X-Amz-SignedHeaders": "host",
-  };
-  const canonicalRequest = [
-    method,
-    canonicalUri(bucket, objectKey),
-    canonicalQueryString(query),
-    `host:${host}\n`,
-    "host",
-    payloadHash,
-  ].join("\n");
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await getSigningKey(secretAccessKey, dateStamp);
-  const signature = bytesToHex(await hmac(signingKey, stringToSign));
-  return `${r2Endpoint(accountId)}${canonicalUri(bucket, objectKey)}?${canonicalQueryString({
-    ...query,
-    "X-Amz-Signature": signature,
-  })}`;
-}
-
-async function copyText(text: string) {
-  if (!text) return;
-  if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.left = "-9999px";
-  document.body.append(area);
-  area.select();
-  const copied = document.execCommand("copy");
-  area.remove();
-  if (!copied) throw new Error("复制失败，请手动选中文本复制。");
-}
-
-function saveBlob(file: ReceivedFile) {
-  const anchor = document.createElement("a");
-  anchor.href = file.url;
-  anchor.download = file.name;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-}
-
-function formatFetchError(error: unknown) {
-  if (error instanceof TypeError) {
-    return "浏览器请求 R2 失败。请检查 bucket CORS 是否允许当前页面 Origin、PUT/GET，以及上传所需的 Authorization、Content-Type、x-amz-date、x-amz-content-sha256。";
-  }
-  return error instanceof Error ? error.message : "R2 请求失败。";
 }
 
 export function createR2Page() {
@@ -435,6 +124,12 @@ export function createR2Page() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
 
+  useEffect(() => {
+    return () => {
+      receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
+    };
+  }, []);
+
   const credentials = useMemo<R2Credentials>(
     () => ({ accountId, bucket, accessKeyId, secretAccessKey }),
     [accountId, bucket, accessKeyId, secretAccessKey],
@@ -445,6 +140,12 @@ export function createR2Page() {
   const endpointLabel = endpointAccountId ? `${endpointAccountId}.r2.cloudflarestorage.com` : "未配置";
   const objectUrl = objectKey ? r2ObjectUrl(credentials, objectKey) : incomingCode ? r2ObjectUrl(incomingCode, incomingCode.objectKey) : "";
   const expiresAtText = incomingCode?.expiresAt ? new Date(incomingCode.expiresAt).toLocaleString() : "未生成";
+
+  function clearReceivedFiles() {
+    receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
+    receivedFilesRef.current = [];
+    setReceivedFiles([]);
+  }
 
   function resetAll() {
     setMode(null);
@@ -463,6 +164,7 @@ export function createR2Page() {
     setReceiverProgress(0);
     setIsUploading(false);
     setIsDownloading(false);
+    clearReceivedFiles();
   }
 
   function handleFile(file: File | null) {
