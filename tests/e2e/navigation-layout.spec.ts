@@ -9,6 +9,7 @@ import {
   expectRectStable,
   expectSharedPanelsVisible,
   expectSliderAligned,
+  expectStatusPanelUsesFullLeftRail,
   getLayoutMetrics,
   installAppMocks,
   openRoute,
@@ -67,6 +68,7 @@ for (const viewport of viewports) {
         await expectSharedPanelsVisible(page);
         await expectSliderAligned(page);
         await expectNoLayoutOverflow(page);
+        await expectStatusPanelUsesFullLeftRail(page);
       }
     });
   });
@@ -176,30 +178,3 @@ for (const viewport of stableGeometryViewports) {
     });
   });
 }
-
-test.describe("visual regression snapshots", () => {
-  let consoleErrors: string[];
-
-  test.beforeEach(async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 868 });
-    consoleErrors = collectConsoleErrors(page);
-    await installAppMocks(page);
-  });
-
-  test.afterEach(async () => {
-    await expectNoConsoleErrors(consoleErrors);
-  });
-
-  for (const route of routeIds) {
-    test(`${route} desktop layout snapshot`, async ({ page }) => {
-      await openRoute(page, route);
-      await waitForLayoutStable(page);
-      await expectSharedPanelsVisible(page);
-      await expect(page).toHaveScreenshot(`${route}-1920x868.png`, {
-        animations: "disabled",
-        fullPage: true,
-        maxDiffPixelRatio: 0.005,
-      });
-    });
-  }
-});

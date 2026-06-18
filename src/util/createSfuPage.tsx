@@ -30,10 +30,10 @@ import { decodeConnectionPayload, encodeConnectionPayload } from "../features/tr
 import { waitForBuffer, waitForDataChannelOpen } from "../features/transfer/services/dataChannel";
 import {
   ActionPanel,
+  ConnectionDetails,
   FilePickerPanel,
   FilesPanel,
   MainPanelGrid,
-  MetricGrid,
   ReceivedFilesPanel,
   RoleOption,
   StatusPanel,
@@ -557,8 +557,7 @@ export function createSfuPage() {
 
         <div className="my-5 h-px shrink-0 bg-[#e3edf9]" />
 
-        <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-        <MetricGrid items={details} />
+        <ConnectionDetails items={details} />
       </StatusPanel>
 
       <MainPanelGrid>

@@ -42,7 +42,7 @@ export function TransferPageGrid({ children }: { children: ReactNode }) {
 export function StatusPanel({ children }: { children: ReactNode }) {
   return (
     <Panel className="transfer-panel transfer-status-panel" testId="status-panel">
-      <div className="transfer-panel-body">{children}</div>
+      <div className="transfer-panel-body transfer-status-panel-body">{children}</div>
     </Panel>
   );
 }
@@ -121,6 +121,30 @@ export function MetricGrid({ items }: { items: MetricItem[] }) {
         <MetricCard item={item} key={item.label} />
       ))}
     </div>
+  );
+}
+
+export function ConnectionDetails({
+  items,
+  primaryCount = 4,
+}: {
+  items: MetricItem[];
+  primaryCount?: number;
+}) {
+  const primaryItems = items.slice(0, primaryCount);
+  const secondaryItems = items.slice(primaryCount);
+
+  return (
+    <section className="connection-details">
+      <h2 className="mb-3 shrink-0 text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
+      <MetricGrid items={primaryItems} />
+      {secondaryItems.length > 0 && (
+        <details className="connection-details-secondary">
+          <summary>更多详情</summary>
+          <MetricGrid items={secondaryItems} />
+        </details>
+      )}
+    </section>
   );
 }
 

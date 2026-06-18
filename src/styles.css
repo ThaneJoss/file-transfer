@@ -106,7 +106,11 @@ button {
 
 .transfer-status-panel {
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 1 / span 2;
+}
+
+.transfer-status-panel-body {
+  overflow: hidden;
 }
 
 .transfer-action-panel {
@@ -161,6 +165,57 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(min(84px, 100%), 1fr));
   gap: 0.5rem;
   text-align: center;
+}
+
+.connection-details {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.connection-details-secondary {
+  min-width: 0;
+  margin-top: 0.75rem;
+}
+
+.connection-details-secondary > summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #d7e5f6;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0 0.85rem;
+  color: #1677ff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  list-style: none;
+  cursor: pointer;
+}
+
+.connection-details-secondary > summary::-webkit-details-marker {
+  display: none;
+}
+
+.connection-details-secondary > summary::after {
+  content: "+";
+  color: #526c92;
+  font-weight: 900;
+}
+
+.connection-details-secondary[open] > summary::after {
+  content: "-";
+}
+
+.connection-details-secondary[open] > .grid {
+  max-height: min(34dvh, 280px);
+  margin-top: 0.75rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+  scrollbar-gutter: stable;
 }
 
 @media (max-width: 1179px) {
@@ -226,6 +281,17 @@ button {
   .transfer-panel-body {
     flex: 0 1 auto;
     overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .connection-details {
+    flex: 0 1 auto;
+  }
+
+  .connection-details-secondary[open] > .grid {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
     scrollbar-gutter: auto;
   }
 

@@ -574,6 +574,44 @@ export async function expectNoLayoutOverflow(page: Page) {
   expect(report).toEqual([]);
 }
 
+export async function expectStatusPanelUsesFullLeftRail(page: Page) {
+  const report = await page.evaluate(() => {
+    const tolerance = 2;
+    const failures: string[] = [];
+    const viewportWidth = document.documentElement.clientWidth;
+    if (viewportWidth < 1180) return failures;
+
+    const panel = document.querySelector("[data-testid='status-panel']");
+    const workspace = document.querySelector("[data-testid='transfer-page-root']");
+    const body = panel?.querySelector(".transfer-status-panel-body");
+    if (!panel || !workspace || !(body instanceof HTMLElement)) {
+      return ["missing status rail elements"];
+    }
+
+    const panelRect = panel.getBoundingClientRect();
+    const workspaceRect = workspace.getBoundingClientRect();
+    if (Math.abs(panelRect.bottom - workspaceRect.bottom) > tolerance) {
+      failures.push("status panel does not fill left rail height");
+    }
+
+    const bodyStyle = getComputedStyle(body);
+    if (bodyStyle.overflowY !== "hidden") {
+      failures.push("status panel body allows default vertical scrolling");
+    }
+    if (body.scrollHeight > body.clientHeight + tolerance) {
+      failures.push("status panel content overflows its default viewport");
+    }
+
+    const secondaryDetails = panel.querySelector(".connection-details-secondary");
+    if (secondaryDetails?.hasAttribute("open")) {
+      failures.push("secondary connection details should be collapsed by default");
+    }
+
+    return failures;
+  });
+  expect(report).toEqual([]);
+}
+
 declare global {
   interface Window {
     __appTest: {
