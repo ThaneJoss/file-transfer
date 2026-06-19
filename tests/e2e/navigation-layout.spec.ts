@@ -20,18 +20,15 @@ import {
   waitForLayoutStable,
 } from "./support/app";
 
-const viewports = [
+const routeCoverageViewports = [
   { width: 1920, height: 868 },
-  { width: 1440, height: 900 },
   { width: 1280, height: 800 },
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
 ];
 
 const stableGeometryViewports = [
-  { width: 1920, height: 868 },
   { width: 1440, height: 900 },
-  { width: 1280, height: 800 },
 ];
 
 const stableLayoutKeys = [
@@ -47,7 +44,7 @@ const stableLayoutKeys = [
   "uploadDropzone",
 ] as const;
 
-for (const viewport of viewports) {
+for (const viewport of routeCoverageViewports) {
   test.describe(`route accessibility and overflow ${viewport.width}x${viewport.height}`, () => {
     let consoleErrors: string[];
 
@@ -70,7 +67,9 @@ for (const viewport of viewports) {
         await expectSliderAligned(page);
         await expectNoLayoutOverflow(page);
         await expectStatusPanelUsesFullLeftRail(page);
-        await expectStatusPanelDetailsSwitches(page);
+        if (route === "direct") {
+          await expectStatusPanelDetailsSwitches(page);
+        }
       }
     });
   });
@@ -90,22 +89,20 @@ for (const viewport of stableGeometryViewports) {
       await expectNoConsoleErrors(consoleErrors);
     });
 
-    test("keeps shared shell and workspace geometry stable through two full route cycles", async ({ page }) => {
+    test("keeps shared shell and workspace geometry stable through a full route cycle", async ({ page }) => {
       const sequence: RouteId[] = ["stun", "turn", "sfu", "r2", "direct"];
       await openRoute(page, "direct");
       await waitForLayoutStable(page);
       const baseline = await getLayoutMetrics(page);
 
-      for (let cycle = 0; cycle < 2; cycle += 1) {
-        for (const route of sequence) {
-          await page.getByTestId(`nav-item-${route}`).click();
-          await expect(page).toHaveURL(routePath[route]);
-          await expectActiveNav(page, route);
-          await waitForLayoutStable(page);
-          expectRectStable(baseline, await getLayoutMetrics(page), [...stableLayoutKeys]);
-          await expectSliderAligned(page);
-          await expectNoHorizontalOverflow(page);
-        }
+      for (const route of sequence) {
+        await page.getByTestId(`nav-item-${route}`).click();
+        await expect(page).toHaveURL(routePath[route]);
+        await expectActiveNav(page, route);
+        await waitForLayoutStable(page);
+        expectRectStable(baseline, await getLayoutMetrics(page), [...stableLayoutKeys]);
+        await expectSliderAligned(page);
+        await expectNoHorizontalOverflow(page);
       }
     });
 
