@@ -57,13 +57,19 @@ jobs:
         run: pnpm test:unit
 
   e2e:
-    name: E2E tests (${{ matrix.shard }}/2)
+    name: E2E tests (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        include:
+          - group: layout
+            specs: tests/e2e/navigation-layout.spec.ts
+          - group: direct-r2
+            specs: tests/e2e/direct.spec.ts tests/e2e/r2.spec.ts tests/e2e/live/live.spec.ts
+          - group: relay
+            specs: tests/e2e/stun.spec.ts tests/e2e/turn.spec.ts tests/e2e/sfu.spec.ts
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,13 +100,13 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: E2E tests
-        run: pnpm test:e2e --shard=${{ matrix.shard }}/2
+        run: pnpm test:e2e ${{ matrix.specs }}
 
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-e2e-${{ matrix.shard }}
+          name: playwright-report-e2e-${{ matrix.group }}
           path: playwright-report/
           if-no-files-found: ignore
 
