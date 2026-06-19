@@ -51,7 +51,14 @@ live 测试默认跳过。不要把真实 session、临时凭证写入源码、f
 VITE_API_BASE_URL=http://localhost:8787 pnpm dev
 ```
 
-注册、登录、退出和 session 由 Better Auth 提供。所有后端 API 请求携带 session cookie；页面顶部展示当前用户与 TURN/R2/SFU 事件数。
+注册、登录、退出和 session 由 Better Auth 提供，前端只提供 Passkey 鉴权。注册时前端先调用 `POST /v1/passkey/registration-context` 取得一次性 `context`，再交给 Better Auth Passkey 注册；登录直接调用 Better Auth Passkey。所有后端 API 请求携带 session cookie；页面顶部展示当前用户与 TURN/R2/SFU 事件数。
+
+本地 Worker 鉴权环境需要与前端 origin 匹配：
+
+```bash
+BETTER_AUTH_URL=http://localhost:8787
+APP_ORIGIN=http://localhost:5173
+```
 
 ## Deploy
 

@@ -34,6 +34,58 @@ export function testAuthSession() {
   };
 }
 
+export async function installWebAuthnMocks(page: Page) {
+  await page.addInitScript(() => {
+    const encoder = new TextEncoder();
+    const bytes = (value: string) => encoder.encode(value).buffer;
+
+    class MockPublicKeyCredential {}
+    Object.defineProperty(MockPublicKeyCredential, "isConditionalMediationAvailable", {
+      value: async () => false,
+    });
+    Object.defineProperty(MockPublicKeyCredential, "isUserVerifyingPlatformAuthenticatorAvailable", {
+      value: async () => true,
+    });
+    Object.defineProperty(window, "PublicKeyCredential", {
+      configurable: true,
+      value: MockPublicKeyCredential,
+    });
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          id: "mock-passkey-id",
+          rawId: bytes("mock-passkey-raw-id"),
+          type: "public-key",
+          authenticatorAttachment: "platform",
+          response: {
+            attestationObject: bytes("mock-attestation"),
+            clientDataJSON: bytes("mock-client-data"),
+            getTransports: () => ["internal"],
+            getPublicKeyAlgorithm: () => -7,
+            getPublicKey: () => bytes("mock-public-key"),
+            getAuthenticatorData: () => bytes("mock-authenticator-data"),
+          },
+          getClientExtensionResults: () => ({}),
+        }),
+        get: async () => ({
+          id: "mock-passkey-id",
+          rawId: bytes("mock-passkey-raw-id"),
+          type: "public-key",
+          authenticatorAttachment: "platform",
+          response: {
+            authenticatorData: bytes("mock-authenticator-data"),
+            clientDataJSON: bytes("mock-client-data"),
+            signature: bytes("mock-signature"),
+            userHandle: bytes("user-test"),
+          },
+          getClientExtensionResults: () => ({}),
+        }),
+      },
+    });
+  });
+}
+
 export type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal" | "turn-webrtc-signal";
 export type CandidateType = "host" | "srflx" | "relay";
 
