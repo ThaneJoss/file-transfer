@@ -10,11 +10,11 @@ import {
 } from "./support/app";
 
 async function chooseUploadMode(page: Page) {
-  await page.getByRole("button", { name: /上传文件/ }).click();
+  await page.getByRole("button", { name: /发送文件/ }).click();
 }
 
 async function chooseDownloadMode(page: Page) {
-  await page.getByRole("button", { name: /下载文件/ }).click();
+  await page.getByRole("button", { name: /接收文件/ }).click();
 }
 
 async function fillR2Credentials(page: Page) {

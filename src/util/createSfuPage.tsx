@@ -38,6 +38,7 @@ import {
   ReceivedFilesPanel,
   RoleOption,
   StatusPanel,
+  StatusPanelHeader,
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
@@ -221,6 +222,7 @@ export function createSfuPage() {
     closeReceiverSession();
     setStatusPanelView("status");
     setMode(null);
+    setSelectedFile(null);
     setConnectionCode("");
     setReceiverCodeInput("");
     setSenderStatus("填写 App ID / App Token 并选择文件后创建 SFU 发布通道。");
@@ -547,31 +549,31 @@ export function createSfuPage() {
       <StatusPanel>
         {statusPanelView === "details" ? (
           <>
-            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-              <div>
-                <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-                <p className="mt-1 text-[15px] text-[#526c92]">查看 SFU 会话、DataChannel、Peer 状态和文件进度。</p>
-              </div>
-              <SecondaryButton onClick={() => setStatusPanelView("status")}>
-                <ArrowLeft aria-hidden="true" size={17} />
-                返回状态
-              </SecondaryButton>
-            </div>
+            <StatusPanelHeader
+              title="连接详情"
+              description="查看 SFU 会话、DataChannel、Peer 状态和文件进度。"
+              action={(
+                <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                  <ArrowLeft aria-hidden="true" size={17} />
+                  返回状态
+                </SecondaryButton>
+              )}
+            />
 
             <ConnectionDetails items={details} expanded showHeading={false} />
           </>
         ) : (
           <>
-            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-              <div>
-                <h2 className="text-[22px] font-extrabold text-[#061b3a]">SFU 连接状态</h2>
-                <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare Realtime SFU 单向 DataChannel 分发文件。</p>
-              </div>
-              <SecondaryButton onClick={resetAll}>
-                <RefreshCw aria-hidden="true" size={17} />
-                重置
-              </SecondaryButton>
-            </div>
+            <StatusPanelHeader
+              title="SFU 连接状态"
+              description="通过 Cloudflare Realtime SFU 单向 DataChannel 分发文件。"
+              action={(
+                <SecondaryButton onClick={resetAll}>
+                  <RefreshCw aria-hidden="true" size={17} />
+                  重置
+                </SecondaryButton>
+              )}
+            />
 
             <TransferSteps steps={steps} />
 
@@ -585,13 +587,8 @@ export function createSfuPage() {
       <MainPanelGrid>
         <ActionPanel>
           <div className="mb-4">
-            <h2 className="text-[22px] font-extrabold text-[#061b3a]">Cloudflare SFU</h2>
-            <p className="mt-1 text-[15px] text-[#526c92]">App ID / App Token 由用户在浏览器内填写。</p>
-          </div>
-
-          <div className="adaptive-field-grid mb-4">
-            <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
-            <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
+            <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
+            <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
           </div>
 
           {!mode && (
@@ -606,13 +603,23 @@ export function createSfuPage() {
                 title="接收文件"
                 description="粘贴连接码并订阅 SFU DataChannel"
                 icon={Download}
-                onClick={() => setMode("receive")}
+                onClick={() => {
+                  setSelectedFile(null);
+                  setConnectionCode("");
+                  setSentBytes(0);
+                  setSenderProgress(0);
+                  setMode("receive");
+                }}
               />
             </div>
           )}
 
           {mode === "send" && (
             <div className="grid gap-4">
+              <div className="adaptive-field-grid">
+                <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
+                <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
+              </div>
               <TextArea
                 label={`发送方 SFU 连接码 ${codeSize}`}
                 value={connectionCode}
@@ -640,6 +647,10 @@ export function createSfuPage() {
 
           {mode === "receive" && (
             <div className="grid gap-4">
+              <div className="adaptive-field-grid">
+                <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
+                <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
+              </div>
               <TextArea
                 label="发送方 SFU 连接码"
                 value={receiverCodeInput}
@@ -662,11 +673,27 @@ export function createSfuPage() {
             inputRef={fileInputRef}
             onFileInput={handleFileInput}
             onDrop={handleDrop}
-            ariaLabel="选择发送文件"
+            ariaLabel={mode === "send" ? "选择发送文件" : "文件选择状态"}
             title={selectedFile?.name}
-            titleFallback="点击或拖拽文件到此处上传"
-            subtitle={selectedFile ? formatBytes(selectedFile.size) : "发送端选择文件后创建 SFU 发布通道"}
+            titleFallback={
+              mode === "receive"
+                ? "接收端无需选择文件"
+                : mode === "send"
+                  ? "点击或拖拽文件到此处上传"
+                  : "先选择发送文件角色"
+            }
+            subtitle={
+              mode === "receive"
+                ? "订阅 DataChannel 后等待发送方传输"
+                : mode === "send"
+                  ? selectedFile
+                    ? formatBytes(selectedFile.size)
+                    : "发送端选择文件后创建 SFU 发布通道"
+                  : "选择左侧发送文件后启用文件选择"
+            }
             onSelect={() => fileInputRef.current?.click()}
+            disabled={mode !== "send"}
+            icon={mode === "receive" ? Download : UploadCloud}
           />
         </UploadPanel>
       </MainPanelGrid>

@@ -113,6 +113,32 @@ button {
   overflow: hidden;
 }
 
+.status-panel-header {
+  display: grid;
+  min-height: 76px;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.status-panel-heading {
+  min-width: 0;
+}
+
+.status-panel-description {
+  display: -webkit-box;
+  min-height: 40px;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: #526c92;
+  font-size: 15px;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .transfer-action-panel {
   grid-column: 2;
   grid-row: 1;
@@ -144,6 +170,12 @@ button {
 
 .file-picker-panel > * {
   min-width: 0;
+}
+
+.file-picker-panel-muted {
+  border-style: solid;
+  border-color: #d7e5f6;
+  background: linear-gradient(180deg, rgba(247, 251, 255, 0.94), rgba(239, 246, 255, 0.76));
 }
 
 .inline-card-header {
@@ -272,6 +304,15 @@ button {
 
   .transfer-status-panel-body {
     overflow: visible;
+  }
+
+  .status-panel-header {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .status-panel-description {
+    min-height: 0;
   }
 
   .connection-details {

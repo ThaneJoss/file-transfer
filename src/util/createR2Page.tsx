@@ -36,6 +36,7 @@ import {
   ReceivedFilesPanel,
   RoleOption,
   StatusPanel,
+  StatusPanelHeader,
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
@@ -384,31 +385,31 @@ export function createR2Page() {
       <StatusPanel>
         {statusPanelView === "details" ? (
           <>
-            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-              <div>
-                <h2 className="text-[22px] font-extrabold text-[#061b3a]">连接详情</h2>
-                <p className="mt-1 text-[15px] text-[#526c92]">查看 R2 对象、连接码、下载链接和传输进度。</p>
-              </div>
-              <SecondaryButton onClick={() => setStatusPanelView("status")}>
-                <ArrowLeft aria-hidden="true" size={17} />
-                返回状态
-              </SecondaryButton>
-            </div>
+            <StatusPanelHeader
+              title="连接详情"
+              description="查看 R2 对象、连接码、下载链接和传输进度。"
+              action={(
+                <SecondaryButton onClick={() => setStatusPanelView("status")}>
+                  <ArrowLeft aria-hidden="true" size={17} />
+                  返回状态
+                </SecondaryButton>
+              )}
+            />
 
             <ConnectionDetails items={details} expanded showHeading={false} />
           </>
         ) : (
           <>
-            <div className="mb-5 flex shrink-0 items-start justify-between gap-4">
-              <div>
-                <h2 className="text-[22px] font-extrabold text-[#061b3a]">R2 传输状态</h2>
-                <p className="mt-1 text-[15px] text-[#526c92]">通过 Cloudflare R2 S3 API 上传和下载临时文件。</p>
-              </div>
-              <SecondaryButton onClick={resetAll}>
-                <RefreshCw aria-hidden="true" size={17} />
-                重置
-              </SecondaryButton>
-            </div>
+            <StatusPanelHeader
+              title="R2 传输状态"
+              description="通过 Cloudflare R2 S3 API 上传和下载临时文件。"
+              action={(
+                <SecondaryButton onClick={resetAll}>
+                  <RefreshCw aria-hidden="true" size={17} />
+                  重置
+                </SecondaryButton>
+              )}
+            />
 
             <TransferSteps steps={steps} />
 
@@ -422,10 +423,8 @@ export function createR2Page() {
       <MainPanelGrid>
         <ActionPanel>
           <div className="mb-4">
-            <h2 className="text-[22px] font-extrabold text-[#061b3a]">Cloudflare R2</h2>
-            <p className="mt-1 text-[15px] text-[#526c92]">
-              {mode === "receive" ? "接收方只需要粘贴发送方的 R2 连接码。" : "发送方在浏览器内填写 R2 凭证，用于上传和生成预签名下载链接。"}
-            </p>
+            <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
+            <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
           </div>
 
           {mode === "send" && (
@@ -442,16 +441,21 @@ export function createR2Page() {
           {!mode && (
             <div className="grid gap-3">
               <RoleOption
-                title="上传文件"
+                title="发送文件"
                 description="上传到 R2 并复制连接码"
                 icon={UploadCloud}
                 onClick={() => setMode("send")}
               />
               <RoleOption
-                title="下载文件"
+                title="接收文件"
                 description="粘贴连接码并从 R2 拉取"
                 icon={Download}
-                onClick={() => setMode("receive")}
+                onClick={() => {
+                  setSelectedFile(null);
+                  setObjectKey("");
+                  setConnectionCode("");
+                  setMode("receive");
+                }}
               />
             </div>
           )}
@@ -508,11 +512,27 @@ export function createR2Page() {
             inputRef={fileInputRef}
             onFileInput={handleFileInput}
             onDrop={handleDrop}
-            ariaLabel="选择上传文件"
+            ariaLabel={mode === "send" ? "选择上传文件" : "文件选择状态"}
             title={selectedFile?.name}
-            titleFallback="点击或拖拽文件到此处上传"
-            subtitle={selectedFile ? formatBytes(selectedFile.size) : "选择文件后上传到 Cloudflare R2"}
+            titleFallback={
+              mode === "receive"
+                ? "接收端无需选择文件"
+                : mode === "send"
+                  ? "点击或拖拽文件到此处上传"
+                  : "先选择发送文件角色"
+            }
+            subtitle={
+              mode === "receive"
+                ? "粘贴连接码后从 Cloudflare R2 下载"
+                : mode === "send"
+                  ? selectedFile
+                    ? formatBytes(selectedFile.size)
+                    : "选择文件后上传到 Cloudflare R2"
+                  : "选择左侧发送文件后启用文件选择"
+            }
             onSelect={() => fileInputRef.current?.click()}
+            disabled={mode !== "send"}
+            icon={mode === "receive" ? Download : UploadCloud}
           />
         </UploadPanel>
       </MainPanelGrid>

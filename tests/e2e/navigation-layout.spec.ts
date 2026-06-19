@@ -38,6 +38,7 @@ const stableLayoutKeys = [
   "pageSlot",
   "workspace",
   "statusPanel",
+  "statusSteps",
   "targetPanel",
   "uploadPanel",
   "fileListPanel",
