@@ -6,9 +6,10 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,17 +31,58 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.6.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.1.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Unit tests
         run: pnpm test:unit
+
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.6.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.1.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
       - name: E2E tests
         run: pnpm test:e2e
-
-      - name: Build
-        run: pnpm build
 
       - name: Upload Playwright report
         if: failure()
@@ -49,3 +91,60 @@ jobs:
           name: playwright-report
           path: playwright-report/
           if-no-files-found: ignore
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.6.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.1.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [typecheck, unit, e2e, build]
+    if: always()
+    steps:
+      - name: Check parallel CI results
+        run: |
+          failed=0
+
+          if [[ "${{ needs.typecheck.result }}" != "success" ]]; then
+            echo "typecheck: ${{ needs.typecheck.result }}"
+            failed=1
+          fi
+
+          if [[ "${{ needs.unit.result }}" != "success" ]]; then
+            echo "unit: ${{ needs.unit.result }}"
+            failed=1
+          fi
+
+          if [[ "${{ needs.e2e.result }}" != "success" ]]; then
+            echo "e2e: ${{ needs.e2e.result }}"
+            failed=1
+          fi
+
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "build: ${{ needs.build.result }}"
+            failed=1
+          fi
+
+          exit "$failed"
