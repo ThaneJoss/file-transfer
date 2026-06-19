@@ -18,10 +18,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
-import { waitForBuffer, waitForDataChannelOpen } from "../features/transfer/services/dataChannel";
-import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
-import { generateCloudflareTurnIceServers } from "../features/turn/services/cloudflareTurn";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
+import { generateCloudflareTurnIceServers } from "../turn/services/cloudflareTurn";
+import { decodeConnectionPayload, encodeConnectionPayload } from "./protocol/connectionCode";
+import { waitForBuffer, waitForDataChannelOpen } from "./services/dataChannel";
 import {
   ActionPanel,
   ConnectionDetails,
@@ -35,11 +35,11 @@ import {
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
-} from "../layout/TransferLayout";
-import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
-import { copyText } from "../lib/browser/clipboard";
-import { saveBlob } from "../lib/browser/download";
-import { formatBytes, formatPercent } from "../lib/files/format";
+} from "../../layout/TransferLayout";
+import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
+import { copyText } from "../../lib/browser/clipboard";
+import { saveBlob } from "../../lib/browser/download";
+import { formatBytes, formatPercent } from "../../lib/files/format";
 
 type SignalPayload = {
   kind: SignalKind;
@@ -657,8 +657,7 @@ async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<Select
   };
 }
 
-export function createTransferPage(variant: TransferVariant) {
-  return function TransferPage() {
+export function TransferPage({ variant }: { variant: TransferVariant }) {
   const config = transferVariantConfig[variant];
   const protocolLabel = variant === "direct" ? "Direct" : variant.toUpperCase();
   const signalPrefix = variant === "direct" ? "" : `${protocolLabel} `;
@@ -1908,5 +1907,4 @@ export function createTransferPage(variant: TransferVariant) {
         </FilesPanel>
     </TransferPageGrid>
   );
-  };
 }

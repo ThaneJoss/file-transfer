@@ -1,5 +1,5 @@
-import { createTransferPage } from "../util/createTransferPage";
+import { TransferPage } from "../features/transfer/TransferPage";
 
-const STUNPage = createTransferPage("stun");
-
-export default STUNPage;
+export default function STUNPage() {
+  return <TransferPage variant="stun" />;
+}

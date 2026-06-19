@@ -1,5 +1,5 @@
-import { createTransferPage } from "../util/createTransferPage";
+import { TransferPage } from "../features/transfer/TransferPage";
 
-const TURNPage = createTransferPage("turn");
-
-export default TURNPage;
+export default function TURNPage() {
+  return <TransferPage variant="turn" />;
+}
