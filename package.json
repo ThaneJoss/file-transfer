@@ -19,6 +19,8 @@
     "check": "pnpm typecheck && pnpm test:unit && pnpm test:e2e && pnpm build"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.19",
+    "better-auth": "^1.6.19",
     "lucide-react": "^1.18.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

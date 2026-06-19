@@ -11,8 +11,102 @@ export const routePath: Record<RouteId, string> = {
   r2: "/r2",
 };
 
+export const apiBaseUrl = "https://api.file.thanejoss.com";
+
+export function testAuthSession() {
+  return {
+    session: {
+      id: "session-test",
+      userId: "user-test",
+      token: "cookie-session-token",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    user: {
+      id: "user-test",
+      name: "测试用户",
+      email: "user@example.com",
+      emailVerified: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export async function installWebAuthnMocks(page: Page) {
+  await page.addInitScript(() => {
+    const encoder = new TextEncoder();
+    const bytes = (value: string) => encoder.encode(value).buffer;
+
+    class MockPublicKeyCredential {}
+    Object.defineProperty(MockPublicKeyCredential, "isConditionalMediationAvailable", {
+      value: async () => false,
+    });
+    Object.defineProperty(MockPublicKeyCredential, "isUserVerifyingPlatformAuthenticatorAvailable", {
+      value: async () => true,
+    });
+    Object.defineProperty(window, "PublicKeyCredential", {
+      configurable: true,
+      value: MockPublicKeyCredential,
+    });
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          id: "mock-passkey-id",
+          rawId: bytes("mock-passkey-raw-id"),
+          type: "public-key",
+          authenticatorAttachment: "platform",
+          response: {
+            attestationObject: bytes("mock-attestation"),
+            clientDataJSON: bytes("mock-client-data"),
+            getTransports: () => ["internal"],
+            getPublicKeyAlgorithm: () => -7,
+            getPublicKey: () => bytes("mock-public-key"),
+            getAuthenticatorData: () => bytes("mock-authenticator-data"),
+          },
+          getClientExtensionResults: () => ({}),
+        }),
+        get: async () => ({
+          id: "mock-passkey-id",
+          rawId: bytes("mock-passkey-raw-id"),
+          type: "public-key",
+          authenticatorAttachment: "platform",
+          response: {
+            authenticatorData: bytes("mock-authenticator-data"),
+            clientDataJSON: bytes("mock-client-data"),
+            signature: bytes("mock-signature"),
+            userHandle: bytes("user-test"),
+          },
+          getClientExtensionResults: () => ({}),
+        }),
+      },
+    });
+  });
+}
+
 export type SignalKind = "direct-webrtc-signal" | "stun-webrtc-signal" | "turn-webrtc-signal";
 export type CandidateType = "host" | "srflx" | "relay";
+
+export async function decodeConnectionCodePayload(page: Page, code: string) {
+  return page.evaluate(async (value) => {
+    const base64UrlToBytes = (input: string) => {
+      const base64 = input.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(input.length / 4) * 4, "=");
+      return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    };
+    let json: string;
+    if (value.startsWith("D1.")) {
+      const stream = new Blob([base64UrlToBytes(value.slice(3))]).stream().pipeThrough(new DecompressionStream("gzip"));
+      json = await new Response(stream).text();
+    } else if (value.startsWith("J1.")) {
+      json = new TextDecoder().decode(base64UrlToBytes(value.slice(3)));
+    } else {
+      json = value;
+    }
+    return JSON.parse(json) as Record<string, unknown>;
+  }, code);
+}
 
 const testCandidateByType: Record<CandidateType, string> = {
   host: "candidate:1 1 udp 2122260223 192.168.0.2 52102 typ host",
@@ -102,6 +196,25 @@ export async function installAppMocks(
     dataChannelFailure?: "close" | "error";
   } = {},
 ) {
+  await page.route(`${apiBaseUrl}/api/auth/get-session`, (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify(testAuthSession()) }),
+  );
+  await page.route(`${apiBaseUrl}/api/auth/sign-out`, (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ success: true }) }),
+  );
+  await page.route(`${apiBaseUrl}/v1/usage`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: [
+          { service: "turn", action: "credential.issued", events: 2, quantity: 2 },
+          { service: "r2", action: "credential.issued", events: 3, quantity: 3 },
+          { service: "sfu", action: "session.create", events: 4, quantity: 4 },
+        ],
+      }),
+    }),
+  );
+
   await page.addInitScript(({ candidateTypes, dataChannelState, dataChannelFailure }) => {
     const selectedTypes = candidateTypes.length ? candidateTypes : ["host", "srflx", "relay"];
     const candidateByType: Record<string, string> = {

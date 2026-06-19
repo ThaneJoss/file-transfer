@@ -7,26 +7,25 @@ import {
   FileText,
   Gauge,
   HardDrive,
-  KeyRound,
   Link2,
   RefreshCw,
   Server,
   UploadCloud,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
 import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
 import {
-  buildObjectKey,
   formatFetchError,
   presignedR2Url,
-  R2Credentials,
   r2ObjectUrl,
   sha256Hex,
   signedR2Request,
 } from "./services/r2Signing";
+import { requestR2Credentials } from "./services/r2Credentials";
+import type { R2TemporaryCredentials } from "./services/r2Credentials";
 import {
   ActionPanel,
   ConnectionDetails,
@@ -48,18 +47,15 @@ import { formatBytes, formatPercent } from "../../lib/files/format";
 
 type R2ConnectionCode = {
   kind: "cloudflare-r2-file-v1";
-  accountId: string;
-  bucket: string;
   objectKey: string;
-  presignedUrl?: string;
-  expiresAt?: number;
+  presignedUrl: string;
+  expiresAt: number;
   file: {
     name: string;
     size: number;
     type: string;
     lastModified: number;
   };
-  createdAt: number;
 };
 
 type ReceivedFile = {
@@ -84,11 +80,18 @@ async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
   const json = await decodeConnectionPayload(trimmed, "当前浏览器不能解压 D1 连接码，请换用最新版 Chrome、Edge 或 Safari。");
 
   const payload = JSON.parse(json) as R2ConnectionCode;
+  let presignedUrl: URL | null = null;
+  try {
+    presignedUrl = new URL(payload.presignedUrl);
+  } catch {
+    // The validation below reports one consistent connection-code error.
+  }
   if (
     payload.kind !== "cloudflare-r2-file-v1" ||
-    !payload.accountId ||
-    !payload.bucket ||
     !payload.objectKey ||
+    !payload.presignedUrl ||
+    presignedUrl?.protocol !== "https:" ||
+    typeof payload.expiresAt !== "number" ||
     !payload.file?.name ||
     typeof payload.file.size !== "number"
   ) {
@@ -100,20 +103,16 @@ async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
 export function R2TransferPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
+  const credentialRequestRef = useRef(0);
 
-  const [accountId, setAccountId] = useState("");
-  const [bucket, setBucket] = useState("");
-  const [accessKeyId, setAccessKeyId] = useState("");
-  const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [prefix, setPrefix] = useState("file-transfer");
-  const [downloadTtl, setDownloadTtl] = useState("3600");
+  const [credentials, setCredentials] = useState<R2TemporaryCredentials | null>(null);
   const [mode, setMode] = useState<Mode>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [objectKey, setObjectKey] = useState("");
   const [connectionCode, setConnectionCode] = useState("");
   const [receiverCodeInput, setReceiverCodeInput] = useState("");
   const [incomingCode, setIncomingCode] = useState<R2ConnectionCode | null>(null);
-  const [senderStatus, setSenderStatus] = useState("填写 R2 S3 API 凭证并选择文件后上传。");
+  const [senderStatus, setSenderStatus] = useState("选择文件后申请临时 R2 凭证并上传。");
   const [receiverStatus, setReceiverStatus] = useState("粘贴 R2 连接码后下载文件。");
   const [senderError, setSenderError] = useState("");
   const [receiverError, setReceiverError] = useState("");
@@ -122,26 +121,28 @@ export function R2TransferPage() {
   const [senderProgress, setSenderProgress] = useState(0);
   const [receiverProgress, setReceiverProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRequestingCredentials, setIsRequestingCredentials] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
 
   useEffect(() => {
     return () => {
+      credentialRequestRef.current += 1;
       receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
     };
   }, []);
 
-  const credentials = useMemo<R2Credentials>(
-    () => ({ accountId, bucket, accessKeyId, secretAccessKey }),
-    [accountId, bucket, accessKeyId, secretAccessKey],
-  );
   const totalBytes = selectedFile?.size ?? incomingCode?.file.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
-  const endpointAccountId = accountId || incomingCode?.accountId || "";
-  const endpointLabel = endpointAccountId ? `${endpointAccountId}.r2.cloudflarestorage.com` : "未配置";
-  const objectUrl = objectKey ? r2ObjectUrl(credentials, objectKey) : incomingCode ? r2ObjectUrl(incomingCode, incomingCode.objectKey) : "";
-  const expiresAtText = incomingCode?.expiresAt ? new Date(incomingCode.expiresAt).toLocaleString() : "未生成";
+  const endpointLabel = credentials?.endpoint || (incomingCode?.presignedUrl ? new URL(incomingCode.presignedUrl).origin : "未配置");
+  const objectUrl = credentials && objectKey
+    ? r2ObjectUrl(credentials, objectKey)
+    : incomingCode?.presignedUrl
+      ? `${new URL(incomingCode.presignedUrl).origin}${new URL(incomingCode.presignedUrl).pathname}`
+      : "";
+  const expiresAt = incomingCode?.expiresAt ?? (credentials ? Date.parse(credentials.expiresAt) : 0);
+  const expiresAtText = expiresAt ? new Date(expiresAt).toLocaleString() : "未生成";
 
   function clearReceivedFiles() {
     receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
@@ -150,14 +151,16 @@ export function R2TransferPage() {
   }
 
   function resetAll() {
+    credentialRequestRef.current += 1;
     setStatusPanelView("status");
     setMode(null);
     setSelectedFile(null);
+    setCredentials(null);
     setObjectKey("");
     setConnectionCode("");
     setReceiverCodeInput("");
     setIncomingCode(null);
-    setSenderStatus("填写 R2 S3 API 凭证并选择文件后上传。");
+    setSenderStatus("选择文件后申请临时 R2 凭证并上传。");
     setReceiverStatus("粘贴 R2 连接码后下载文件。");
     setSenderError("");
     setReceiverError("");
@@ -166,31 +169,45 @@ export function R2TransferPage() {
     setSenderProgress(0);
     setReceiverProgress(0);
     setIsUploading(false);
+    setIsRequestingCredentials(false);
     setIsDownloading(false);
     clearReceivedFiles();
   }
 
-  function handleFile(file: File | null) {
+  async function handleFile(file: File | null) {
+    const requestVersion = ++credentialRequestRef.current;
+    setIsRequestingCredentials(false);
     setSelectedFile(file);
+    setCredentials(null);
+    setObjectKey("");
     setConnectionCode("");
     setUploadedBytes(0);
     setSenderProgress(0);
     if (file) {
-      const key = buildObjectKey(prefix, file);
-      setObjectKey(key);
-      setSenderStatus(`已选择 ${file.name}，对象 Key 已生成。`);
-    } else {
-      setObjectKey("");
+      try {
+        setIsRequestingCredentials(true);
+        setSenderError("");
+        setSenderStatus(`正在为 ${file.name} 申请临时 R2 凭证...`);
+        const next = await requestR2Credentials(file.name);
+        if (requestVersion !== credentialRequestRef.current) return;
+        setCredentials(next);
+        setObjectKey(next.objectKey);
+        setSenderStatus(`临时 R2 凭证已就绪，对象 Key 由服务端生成。`);
+      } catch (error) {
+        if (requestVersion === credentialRequestRef.current) setSenderError(formatFetchError(error));
+      } finally {
+        if (requestVersion === credentialRequestRef.current) setIsRequestingCredentials(false);
+      }
     }
   }
 
   function handleFileInput(event: ChangeEvent<HTMLInputElement>) {
-    handleFile(event.target.files?.[0] ?? null);
+    void handleFile(event.target.files?.[0] ?? null);
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    handleFile(event.dataTransfer.files?.[0] ?? null);
+    void handleFile(event.dataTransfer.files?.[0] ?? null);
   }
 
   async function uploadSelectedFile() {
@@ -199,7 +216,11 @@ export function R2TransferPage() {
       return;
     }
 
-    const key = objectKey.trim() || buildObjectKey(prefix, selectedFile);
+    if (!credentials || !objectKey) {
+      setSenderError("临时 R2 凭证尚未就绪，请重新选择文件。");
+      return;
+    }
+    const key = objectKey;
     try {
       setIsUploading(true);
       setSenderError("");
@@ -208,10 +229,9 @@ export function R2TransferPage() {
       setSenderProgress(1);
       setSenderStatus("正在计算文件 SHA-256 并签名 R2 PUT 请求...");
       setObjectKey(key);
-      const expiresIn = Number(downloadTtl);
-      if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
-        throw new Error("下载链接有效期必须是 1 到 604800 秒。");
-      }
+      const expiresAt = Date.parse(credentials.expiresAt);
+      const expiresIn = Math.min(900, Math.floor((expiresAt - Date.now()) / 1000));
+      if (!Number.isFinite(expiresAt) || expiresIn < 1) throw new Error("R2 临时凭证已过期，请重新选择文件。");
 
       const buffer = await selectedFile.arrayBuffer();
       const payloadHash = await sha256Hex(buffer);
@@ -243,18 +263,15 @@ export function R2TransferPage() {
       });
       const code = await encodeConnectionCode({
         kind: "cloudflare-r2-file-v1",
-        accountId: credentials.accountId.trim(),
-        bucket: credentials.bucket.trim(),
         objectKey: key,
         presignedUrl,
-        expiresAt: Date.now() + expiresIn * 1000,
+        expiresAt,
         file: {
           name: selectedFile.name,
           size: selectedFile.size,
           type: selectedFile.type,
           lastModified: selectedFile.lastModified,
         },
-        createdAt: Date.now(),
       });
       setUploadedBytes(selectedFile.size);
       setSenderProgress(100);
@@ -339,13 +356,12 @@ export function R2TransferPage() {
   }
 
   const codeSize = connectionCode ? `${connectionCode.length.toLocaleString()} 字符` : "";
-  const credentialsReady =
-    mode === "receive" ? Boolean(incomingCode?.presignedUrl || receiverCodeInput.trim()) : Boolean(accountId && bucket && accessKeyId && secretAccessKey);
+  const credentialsReady = mode === "receive" ? Boolean(incomingCode?.presignedUrl || receiverCodeInput.trim()) : Boolean(credentials);
   const steps: TransferStepItem[] = [
     {
       label: mode === "receive" ? "连接码" : "凭证",
       meta: credentialsReady ? (mode === "receive" ? "已粘贴" : "已填写") : mode === "receive" ? "等待粘贴" : "等待填写",
-      icon: mode === "receive" ? Link2 : KeyRound,
+      icon: mode === "receive" ? Link2 : Server,
       active: credentialsReady,
       connectorActive: credentialsReady,
     },
@@ -367,11 +383,11 @@ export function R2TransferPage() {
   ];
   const details: MetricItem[] = [
     { label: "连接类型", value: "Cloudflare R2 S3 API", icon: Link2 },
-    { label: "Endpoint", value: endpointLabel, icon: Server, active: Boolean(accountId) },
-    { label: "Bucket", value: bucket || incomingCode?.bucket || "未配置", icon: Database, active: Boolean(bucket || incomingCode?.bucket) },
+    { label: "Endpoint", value: endpointLabel, icon: Server, active: Boolean(credentials || incomingCode) },
+    { label: "Bucket", value: credentials?.bucket || "仅发送方内存可见", icon: Database, active: Boolean(credentials) },
     { label: "对象 Key", value: objectKey || incomingCode?.objectKey || "未生成", icon: FileText, active: Boolean(objectKey || incomingCode?.objectKey) },
     { label: "对象 URL", value: objectUrl || "未生成", icon: Link2 },
-    { label: "下载链接过期", value: expiresAtText, icon: Gauge, active: Boolean(incomingCode?.expiresAt) },
+    { label: "下载链接过期", value: expiresAtText, icon: Gauge, active: Boolean(expiresAt) },
     { label: "选中文件", value: selectedFile ? selectedFile.name : incomingCode?.file.name ?? "未选择", icon: HardDrive },
     { label: "文件大小", value: totalBytes ? formatBytes(totalBytes) : "0 B", icon: Database },
     { label: "已上传", value: formatBytes(uploadedBytes), icon: UploadCloud },
@@ -426,17 +442,6 @@ export function R2TransferPage() {
             <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
           </div>
 
-          {mode === "send" && (
-            <div className="adaptive-field-grid mb-4">
-              <TextInput label="Account ID" value={accountId} onChange={setAccountId} placeholder="Cloudflare account id" />
-              <TextInput label="Bucket" value={bucket} onChange={setBucket} placeholder="R2 bucket name" />
-              <TextInput label="Access Key ID" value={accessKeyId} onChange={setAccessKeyId} placeholder="R2 access key id" />
-              <TextInput label="Secret Access Key" value={secretAccessKey} onChange={setSecretAccessKey} placeholder="R2 secret access key" type="password" />
-              <TextInput label="对象前缀" value={prefix} onChange={setPrefix} placeholder="file-transfer" />
-              <TextInput label="下载链接有效期秒" value={downloadTtl} onChange={setDownloadTtl} placeholder="3600" />
-            </div>
-          )}
-
           {!mode && (
             <div className="grid gap-3">
               <RoleOption
@@ -450,7 +455,10 @@ export function R2TransferPage() {
                 description="粘贴连接码并从 R2 拉取"
                 icon={Download}
                 onClick={() => {
+                  credentialRequestRef.current += 1;
                   setSelectedFile(null);
+                  setCredentials(null);
+                  setIsRequestingCredentials(false);
                   setObjectKey("");
                   setConnectionCode("");
                   setMode("receive");
@@ -461,7 +469,10 @@ export function R2TransferPage() {
 
           {mode === "send" && (
             <div className="grid gap-4">
-              <TextInput label="对象 Key" value={objectKey} onChange={setObjectKey} placeholder="选择文件后自动生成，也可以手动修改" />
+              <div className="rounded-xl border border-[#d7e5f6] bg-[#f7fbff] px-4 py-3 text-sm text-[#365a88]">
+                <strong className="block text-[#233d64]">服务端对象 Key</strong>
+                <span className="mt-1 block truncate font-mono text-xs" title={objectKey}>{objectKey || (isRequestingCredentials ? "正在申请..." : "选择文件后生成")}</span>
+              </div>
               <TextArea
                 label={`发送方 R2 连接码 ${codeSize}`}
                 value={connectionCode}
@@ -470,7 +481,7 @@ export function R2TransferPage() {
                 readOnly
               />
               <div className="flex flex-wrap gap-3">
-                <PrimaryButton onClick={() => void uploadSelectedFile()} disabled={!selectedFile || isUploading}>
+                <PrimaryButton onClick={() => void uploadSelectedFile()} disabled={!selectedFile || !credentials || isUploading || isRequestingCredentials}>
                   <UploadCloud aria-hidden="true" size={17} />
                   上传到 R2
                 </PrimaryButton>

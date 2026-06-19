@@ -7,11 +7,10 @@ import { generateCloudflareTurnIceServers, normalizeIceServers } from "./cloudfl
 describe("Cloudflare TURN service", () => {
   it("generates temporary iceServers without placing the token in the URL", async () => {
     server.use(
-      http.post("https://rtc.live.cloudflare.com/v1/turn/keys/:keyId/credentials/generate-ice-servers", async ({ params, request }) => {
-        expect(params.keyId).toBe("test-key");
-        expect(request.url).not.toContain("test-token");
-        expect(request.headers.get("authorization")).toBe("Bearer test-token");
-        expect(await request.json()).toEqual({ ttl: 3600 });
+      http.post("https://api.file.thanejoss.com/v1/turn/credentials", async ({ request }) => {
+        expect(request.credentials).toBe("include");
+        expect(request.headers.get("authorization")).toBeNull();
+        expect(await request.json()).toEqual({ ttlSeconds: 3600 });
         return HttpResponse.json({
           iceServers: [
             {
@@ -24,7 +23,7 @@ describe("Cloudflare TURN service", () => {
       }),
     );
 
-    await expect(generateCloudflareTurnIceServers("test-key", "test-token", 3600)).resolves.toEqual([
+    await expect(generateCloudflareTurnIceServers(3600)).resolves.toEqual([
       {
         urls: ["turn:example.com:3478?transport=udp", "turn:example.com:3478?transport=tcp"],
         username: "user",
@@ -35,12 +34,12 @@ describe("Cloudflare TURN service", () => {
 
   it("maps API failures to status-specific messages", async () => {
     server.use(
-      http.post("https://rtc.live.cloudflare.com/v1/turn/keys/:keyId/credentials/generate-ice-servers", () =>
-        HttpResponse.json({ errors: [{ message: "invalid token" }] }, { status: 401 }),
+      http.post("https://api.file.thanejoss.com/v1/turn/credentials", () =>
+        HttpResponse.json({ error: "Unauthorized" }, { status: 401 }),
       ),
     );
 
-    await expect(generateCloudflareTurnIceServers("test-key", "test-token", 3600)).rejects.toThrow("invalid token");
+    await expect(generateCloudflareTurnIceServers(3600)).rejects.toThrow("Unauthorized");
   });
 
   it("normalizes only valid RTCIceServer objects", () => {

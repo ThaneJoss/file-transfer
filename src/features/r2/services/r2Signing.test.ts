@@ -5,8 +5,10 @@ import { canonicalQueryString, canonicalUri, presignedR2Url, sha256Hex, signedR2
 const credentials = {
   accountId: "example-account",
   bucket: "bucket name",
+  endpoint: "https://example-account.r2.cloudflarestorage.com",
   accessKeyId: "example-access-key",
   secretAccessKey: "fake-secret",
+  sessionToken: "temporary-session-token/+==",
 };
 
 describe("R2 SigV4 signing", () => {
@@ -34,7 +36,9 @@ describe("R2 SigV4 signing", () => {
 
     expect(result.url).toBe("https://example-account.r2.cloudflarestorage.com/bucket%20name/folder/demo.txt");
     expect(result.headers.get("x-amz-date")).toBe("20260102T030405Z");
+    expect(result.headers.get("x-amz-security-token")).toBe(credentials.sessionToken);
     expect(result.headers.get("authorization")).toContain("Credential=example-access-key/20260102/auto/s3/aws4_request");
+    expect(result.headers.get("authorization")).toContain("x-amz-security-token");
     expect(result.headers.get("authorization")).not.toContain(credentials.secretAccessKey);
   });
 
@@ -49,6 +53,7 @@ describe("R2 SigV4 signing", () => {
 
     expect(url).toContain("X-Amz-Date=20260102T030405Z");
     expect(url).toContain("X-Amz-Expires=3600");
+    expect(url).toContain("X-Amz-Security-Token=temporary-session-token%2F%2B%3D%3D");
     expect(url).toContain("X-Amz-Signature=");
     expect(url).not.toContain(credentials.secretAccessKey);
   });

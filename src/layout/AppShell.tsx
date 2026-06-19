@@ -1,6 +1,9 @@
-import { Cloud } from "lucide-react";
+import { Cloud, LogIn, LogOut } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
+
+import { useAuth } from "../lib/auth/AuthProvider";
 
 export type AppRouteId = "direct" | "stun" | "turn" | "sfu" | "r2";
 
@@ -24,6 +27,8 @@ export function AppShell({
   children: ReactNode;
 }) {
   const location = useLocation();
+  const { session, usage, signOut } = useAuth();
+  const [accountError, setAccountError] = useState("");
   const activeRoute = routes.find((route) => route.path === location.pathname)?.id ?? "direct";
   const activeRouteIndex = Math.max(
     0,
@@ -81,6 +86,33 @@ export function AppShell({
             })}
           </div>
         </nav>
+
+        <div className="flex min-w-0 justify-end" data-testid="account-area">
+          {session ? (
+            <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)]">
+              <div className="min-w-0">
+                <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
+                <div className="whitespace-nowrap text-xs text-[#526c92]" aria-label="用量事件">
+                  TURN {usage.turn} · R2 {usage.r2} · SFU {usage.sfu}
+                </div>
+              </div>
+              <button
+                className="rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
+                onClick={() => void signOut().catch((error) => setAccountError(error instanceof Error ? error.message : "退出登录失败。"))}
+                aria-label="退出登录"
+                title={accountError || "退出登录"}
+              >
+                <LogOut aria-hidden="true" size={18} />
+              </button>
+              {accountError && <span className="sr-only" role="alert">{accountError}</span>}
+            </div>
+          ) : (
+            <Link className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-3 text-sm font-bold text-[#1476ff]" to="/login">
+              <LogIn aria-hidden="true" size={18} />
+              登录
+            </Link>
+          )}
+        </div>
       </header>
 
       <section className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto" data-testid="page-slot">
