@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const port = 5173;
+const webServerCommand = process.env.CI
+  ? `pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --port ${port}`
+  : `pnpm dev --host 127.0.0.1 --port ${port}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -13,16 +16,19 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: process.env.CI ? "off" : "retain-on-failure",
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(process.env.CI ? { channel: "chrome" as const } : {}),
+      },
     },
   ],
   webServer: {
-    command: `pnpm dev --host 127.0.0.1 --port ${port}`,
+    command: webServerCommand,
     url: `http://127.0.0.1:${port}/direct`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

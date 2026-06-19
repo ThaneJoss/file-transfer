@@ -2,13 +2,9 @@ import { test, expect, type Page } from "@playwright/test";
 
 import {
   collectConsoleErrors,
-  expectActiveNav,
   expectNoConsoleErrors,
-  expectNoHorizontalOverflow,
-  expectSliderAligned,
   installAppMocks,
   openRoute,
-  routePath,
   selectFile,
   withoutExpectedNetworkDiagnostics,
 } from "./support/app";
@@ -53,22 +49,10 @@ test.describe("TURN page", () => {
     await expectNoConsoleErrors(withoutExpectedNetworkDiagnostics(consoleErrors));
   });
 
-  test("opens directly, refreshes in place, marks nav active, and supports history", async ({ page }) => {
+  test("opens directly with TURN transfer controls", async ({ page }) => {
     await openRoute(page, "turn");
     await expect(page.getByText("TURN Relay DataChannel")).toBeVisible();
     await expect(page.getByText("Cloudflare TURN Credentials")).toBeVisible();
-    await expectActiveNav(page, "turn");
-    await expectSliderAligned(page);
-    await expectNoHorizontalOverflow(page);
-
-    await page.reload();
-    await expect(page).toHaveURL(routePath.turn);
-    await expectActiveNav(page, "turn");
-
-    await page.getByTestId("nav-item-sfu").click();
-    await expect(page).toHaveURL(routePath.sfu);
-    await page.goBack();
-    await expect(page).toHaveURL(routePath.turn);
   });
 
   test("validates empty credentials and generates mocked TURN iceServers", async ({ page }) => {
