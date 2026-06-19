@@ -13,7 +13,7 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: process.env.CI ? "off" : "retain-on-failure",
   },
   projects: [
     {
