@@ -1,6 +1,6 @@
 # 文件中转站
 
-纯前端文件传输实验工具，包含 Direct、STUN、TURN、SFU 和 R2 五种页面。
+浏览器文件传输工具，包含 Direct、STUN、TURN、SFU 和 R2 五种页面。Direct/STUN 公开使用，TURN/SFU/R2 通过 Better Auth session 访问后端控制面。
 
 ## Scripts
 
@@ -15,7 +15,7 @@ pnpm build
 pnpm preview
 ```
 
-`pnpm check` 会依次运行类型检查、Vitest 单元测试、Playwright 端到端测试和生产构建。默认测试全部使用假值和网络拦截，不需要真实 Cloudflare、SFU 或 R2 凭证，也不会访问生产服务。
+`pnpm check` 会依次运行类型检查、Vitest 单元测试、Playwright 端到端测试和生产构建。默认测试全部使用假值和网络拦截，不需要真实 Cloudflare 凭证，也不会访问生产服务。
 
 首次在本地运行端到端测试前安装浏览器：
 
@@ -41,7 +41,17 @@ pnpm exec playwright install chromium --only-shell
 pnpm test:e2e:live
 ```
 
-live 测试默认跳过，只应在具备短期、低权限、可撤销凭证的受控环境运行。不要把真实 Token 写入源码、fixture、`.env.example`、Playwright storage state、截图、trace、video 或报告。
+live 测试默认跳过。不要把真实 session、临时凭证写入源码、fixture、`.env.example`、Playwright storage state、截图、trace、video 或报告。
+
+## API 与鉴权
+
+生产环境默认使用 `https://api.file.thanejoss.com`。本地连接 Worker 时设置：
+
+```bash
+VITE_API_BASE_URL=http://localhost:8787 pnpm dev
+```
+
+注册、登录、退出和 session 由 Better Auth 提供。所有后端 API 请求携带 session cookie；页面顶部展示当前用户与 TURN/R2/SFU 事件数。
 
 ## Deploy
 
@@ -49,19 +59,17 @@ live 测试默认跳过，只应在具备短期、低权限、可撤销凭证的
 
 ## TURN
 
-`/turn` 页面使用 Cloudflare TURN keys。页面内填写 Key ID、API Token 和 TTL 后，会调用：
+`/turn` 页面只保留 60 到 86400 秒的 TTL 输入，并通过后端申请临时 `iceServers`：
 
 ```text
-https://rtc.live.cloudflare.com/v1/turn/keys/{key_id}/credentials/generate-ice-servers
+POST /v1/turn/credentials
 ```
 
 拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件。
 
 ## Security
 
-TURN、SFU 和 R2 凭证都由用户在浏览器运行时手动输入，默认不持久化到 `localStorage`。默认自动化测试只使用 `test-token`、`fake-app-id`、`example-access-key`、`fake-secret` 等明显假值，并通过 MSW 或 Playwright route 拦截验证请求 method、URL、headers 和 body。
-
-R2 页面保留前端手动输入 S3 API 凭证的演示模式。生产环境如需长期后台密钥，应增加最小化 serverless/edge 代理，由服务端保存长期密钥，前端只获取作用域受限、短期有效的凭证。
+TURN、R2、SFU 长期密钥只存在后端。R2 临时凭证仅保存在发送方页面内存中，PUT 直接上传到 R2；连接码只携带服务端生成的对象 Key、文件信息、预签名下载 URL 和过期时间。SFU 控制请求统一经过 `/v1/sfu`，前端不接触 App Token。
 
 ## Dependency Audit
 

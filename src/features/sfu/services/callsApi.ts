@@ -1,7 +1,4 @@
-export type SfuCredentials = {
-  appId: string;
-  appToken: string;
-};
+import { API_BASE_URL, apiRequest } from "../../../lib/api/client";
 
 export type CallsSession = {
   id: string;
@@ -28,46 +25,32 @@ export type CallsApiResponse = {
   datachannels?: DataChannelObject[];
 };
 
-export const callsApiOrigin = "https://rtc.live.cloudflare.com/v1";
+export const callsApiOrigin = `${API_BASE_URL}/v1/sfu`;
 
-export function validateSfuCredentials({ appId, appToken }: SfuCredentials) {
-  if (!appId.trim() || !appToken.trim()) {
-    throw new Error("请填写 Cloudflare Realtime App ID 和 App Token。");
-  }
-}
-
-export async function callsFetch(credentials: SfuCredentials, path: string, init: RequestInit = {}) {
-  validateSfuCredentials(credentials);
-  const response = await fetch(`${callsApiOrigin}/apps/${encodeURIComponent(credentials.appId.trim())}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${credentials.appToken.trim()}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-  const data = (await response.json().catch(() => ({}))) as CallsApiResponse;
+export async function callsFetch(path: string, init: RequestInit = {}) {
+  const data = await apiRequest<CallsApiResponse>(`/v1/sfu${path}`, init);
   const message = data.errorDescription || data.errorCode;
-  if (!response.ok || data.errorCode) {
-    throw new Error(message || `Cloudflare Realtime API 请求失败：HTTP ${response.status}`);
-  }
+  if (data.errorCode) throw new Error(message || "Cloudflare Realtime API 请求失败。");
   return data;
 }
 
-export async function createCallsSession(credentials: SfuCredentials, peerConnection: RTCPeerConnection): Promise<CallsSession> {
-  const response = await callsFetch(credentials, "/sessions/new", { method: "POST" });
+export async function createCallsSession(peerConnection: RTCPeerConnection): Promise<CallsSession> {
+  const response = await callsFetch("/sessions/new", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
   if (!response.sessionId) throw new Error("Cloudflare 没有返回 sessionId。");
   return { id: response.sessionId, peerConnection };
 }
 
-export async function establishDataChannelTransport(credentials: SfuCredentials, session: CallsSession) {
+export async function establishDataChannelTransport(session: CallsSession) {
   const bootstrapChannel = session.peerConnection.createDataChannel("server-events", { negotiated: false });
   bootstrapChannel.addEventListener("message", () => undefined);
 
   const offer = await session.peerConnection.createOffer();
   await session.peerConnection.setLocalDescription(offer);
 
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/establish`, {
+  const response = await callsFetch(`/sessions/${session.id}/datachannels/establish`, {
     method: "POST",
     body: JSON.stringify({
       dataChannel: {
@@ -89,7 +72,7 @@ export async function establishDataChannelTransport(credentials: SfuCredentials,
     await session.peerConnection.setRemoteDescription(response.sessionDescription);
     const answer = await session.peerConnection.createAnswer();
     await session.peerConnection.setLocalDescription(answer);
-    await callsFetch(credentials, `/sessions/${session.id}/renegotiate`, {
+    await callsFetch(`/sessions/${session.id}/renegotiate`, {
       method: "PUT",
       body: JSON.stringify({
         sessionDescription: {
@@ -113,8 +96,8 @@ function getDataChannelId(response: CallsApiResponse) {
   return id;
 }
 
-export async function createPublisherChannel(credentials: SfuCredentials, session: CallsSession, dataChannelName: string) {
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/new`, {
+export async function createPublisherChannel(session: CallsSession, dataChannelName: string) {
+  const response = await callsFetch(`/sessions/${session.id}/datachannels/new`, {
     method: "POST",
     body: JSON.stringify({
       dataChannels: [
@@ -132,12 +115,11 @@ export async function createPublisherChannel(credentials: SfuCredentials, sessio
 }
 
 export async function createSubscriberChannel(
-  credentials: SfuCredentials,
   session: CallsSession,
   publisherSessionId: string,
   dataChannelName: string,
 ) {
-  const response = await callsFetch(credentials, `/sessions/${session.id}/datachannels/new`, {
+  const response = await callsFetch(`/sessions/${session.id}/datachannels/new`, {
     method: "POST",
     body: JSON.stringify({
       dataChannels: [

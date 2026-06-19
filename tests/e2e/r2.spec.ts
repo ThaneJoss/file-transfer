@@ -1,7 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
 import {
+  apiBaseUrl,
   collectConsoleErrors,
+  decodeConnectionCodePayload,
   expectNoConsoleErrors,
   installAppMocks,
   openRoute,
@@ -17,24 +19,33 @@ async function chooseDownloadMode(page: Page) {
   await page.getByRole("button", { name: /接收文件/ }).click();
 }
 
-async function fillR2Credentials(page: Page) {
-  await page.getByLabel("Account ID").fill("example-account");
-  await page.getByLabel("Bucket").fill("demo-bucket");
-  await page.getByLabel("Access Key ID").fill("example-access-key");
-  await page.getByLabel("Secret Access Key").fill("fake-secret");
-  await page.getByLabel("下载链接有效期秒").fill("3600");
+async function mockR2Credentials(page: Page) {
+  await page.route(`${apiBaseUrl}/v1/r2/credentials`, async (route) => {
+    const request = route.request();
+    expect(await request.postDataJSON()).toEqual({ fileName: expect.any(String), ttlSeconds: 900 });
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        accountId: "example-account",
+        bucket: "demo-bucket",
+        endpoint: "https://example-account.r2.cloudflarestorage.com",
+        objectKey: "users/server/folder/a b+测试.txt",
+        accessKeyId: "temporary-access-key",
+        secretAccessKey: "temporary-secret",
+        sessionToken: "temporary-session-token/+==",
+        expiresAt: new Date(Date.now() + 900_000).toISOString(),
+      }),
+    });
+  });
 }
 
 function r2Code(overrides: Partial<Record<string, unknown>> = {}) {
   return JSON.stringify({
     kind: "cloudflare-r2-file-v1",
-    accountId: "example-account",
-    bucket: "demo-bucket",
     objectKey: "folder/demo.txt",
     presignedUrl: "https://example-account.r2.cloudflarestorage.com/demo-bucket/folder/demo.txt?X-Amz-Signature=fake",
     expiresAt: Date.now() + 3600_000,
     file: { name: "demo.txt", size: 5, type: "text/plain", lastModified: 1 },
-    createdAt: Date.now(),
     ...overrides,
   });
 }
@@ -55,54 +66,65 @@ test.describe("R2 page", () => {
     await openRoute(page, "r2");
     await expect(page.getByRole("heading", { name: "R2 传输状态" })).toBeVisible();
     await expect(page.getByText("Cloudflare R2 S3 API", { exact: true })).toBeVisible();
+    for (const label of ["Account ID", "Bucket", "Access Key ID", "Secret Access Key"]) {
+      await expect(page.getByLabel(label)).toHaveCount(0);
+    }
   });
 
-  test("validates upload inputs, signs a mocked PUT, and generates a presigned connection code", async ({ page }) => {
+  test("requests temporary credentials, signs a mocked PUT, and creates a secret-free connection payload", async ({ page }) => {
+    await mockR2Credentials(page);
     await page.route("https://example-account.r2.cloudflarestorage.com/**", async (route) => {
       const request = route.request();
       expect(request.method()).toBe("PUT");
-      expect(request.url()).toContain("folder/a%20b%2B%E6%B5%8B%E8%AF%95.txt");
-      expect(request.url()).not.toContain("fake-secret");
-      expect(request.headers().authorization).toContain("Credential=example-access-key/");
-      expect(request.headers().authorization).not.toContain("fake-secret");
+      expect(request.url()).toContain("users/server/folder/a%20b%2B%E6%B5%8B%E8%AF%95.txt");
+      expect(request.url()).not.toContain("temporary-secret");
+      expect(request.headers().authorization).toContain("Credential=temporary-access-key/");
+      expect(request.headers().authorization).toContain("x-amz-security-token");
+      expect(request.headers()["x-amz-security-token"]).toBe("temporary-session-token/+==");
       await route.fulfill({ status: 200, body: "" });
     });
 
     await openRoute(page, "r2");
     await chooseUploadMode(page);
     await expect(page.getByRole("button", { name: /上传到 R2/ })).toBeDisabled();
-    await fillR2Credentials(page);
     await selectFile(page, "r2-demo.txt");
-    await page.getByLabel("对象 Key").fill("folder/a b+测试.txt");
+    await expect(page.getByText(/对象 Key 由服务端生成/)).toBeVisible();
     await page.getByRole("button", { name: /上传到 R2/ }).click();
     await expect(page.getByLabel(/发送方 R2 连接码/)).not.toHaveValue("");
     await expect(page.getByText(/文件已上传到 R2/)).toBeVisible();
-    await expect(page.getByText("fake-secret")).toHaveCount(0);
+    const encoded = await page.getByLabel(/发送方 R2 连接码/).inputValue();
+    const payload = await decodeConnectionCodePayload(page, encoded);
+    expect(Object.keys(payload).sort()).toEqual(["expiresAt", "file", "kind", "objectKey", "presignedUrl"]);
+    expect(payload).not.toHaveProperty("secretAccessKey");
+    expect(payload).not.toHaveProperty("sessionToken");
+    expect(payload.objectKey).toBe("users/server/folder/a b+测试.txt");
+    expect(payload.presignedUrl).toContain("X-Amz-Security-Token=");
   });
 
-  test("validates TTL boundaries before uploading", async ({ page }) => {
+  test("surfaces temporary credential failures", async ({ page }) => {
+    await page.route(`${apiBaseUrl}/v1/r2/credentials`, (route) =>
+      route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "R2 denied" }) }),
+    );
     await openRoute(page, "r2");
     await chooseUploadMode(page);
-    await fillR2Credentials(page);
     await selectFile(page, "r2-ttl.txt");
-    await page.getByLabel("下载链接有效期秒").fill("0");
-    await page.getByRole("button", { name: /上传到 R2/ }).click();
-    await expect(page.getByRole("alert")).toContainText("1 到 604800 秒");
+    await expect(page.getByRole("alert")).toContainText("R2 denied");
   });
 
   for (const status of [401, 403, 429, 500]) {
     test(`surfaces mocked R2 upload ${status} errors without leaking the secret`, async ({ page }) => {
+      await mockR2Credentials(page);
       await page.route("https://example-account.r2.cloudflarestorage.com/**", async (route) => {
         expect(route.request().url()).not.toContain("fake-secret");
         await route.fulfill({ status, body: `mock ${status}` });
       });
       await openRoute(page, "r2");
       await chooseUploadMode(page);
-      await fillR2Credentials(page);
       await selectFile(page, "r2-error.txt");
+      await expect(page.getByText(/对象 Key 由服务端生成/)).toBeVisible();
       await page.getByRole("button", { name: /上传到 R2/ }).click();
       await expect(page.getByText(new RegExp(`HTTP ${status}`))).toBeVisible();
-      await expect(page.getByText("fake-secret")).toHaveCount(0);
+      await expect(page.getByText("temporary-secret")).toHaveCount(0);
     });
   }
 

@@ -15,18 +15,18 @@ import {
   UploadCloud,
   Wifi,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
 import {
   CallsSession,
   createCallsSession,
   createPublisherChannel,
   createSubscriberChannel,
   establishDataChannelTransport,
-  SfuCredentials,
 } from "./services/callsApi";
+import { callsApiOrigin } from "./services/callsApi";
 import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
 import { waitForBuffer, waitForDataChannelOpen } from "../transfer/services/dataChannel";
 import {
@@ -135,13 +135,11 @@ export function SfuTransferPage() {
   const sendInFlightRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [appId, setAppId] = useState("");
-  const [appToken, setAppToken] = useState("");
   const [mode, setMode] = useState<Mode>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [connectionCode, setConnectionCode] = useState("");
   const [receiverCodeInput, setReceiverCodeInput] = useState("");
-  const [senderStatus, setSenderStatus] = useState("填写 App ID / App Token 并选择文件后创建 SFU 发布通道。");
+  const [senderStatus, setSenderStatus] = useState("选择文件后通过后端创建 SFU 发布通道。");
   const [receiverStatus, setReceiverStatus] = useState("粘贴发送方 SFU 连接码后订阅 DataChannel。");
   const [senderError, setSenderError] = useState("");
   const [receiverError, setReceiverError] = useState("");
@@ -165,7 +163,6 @@ export function SfuTransferPage() {
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
 
-  const credentials = useMemo<SfuCredentials>(() => ({ appId, appToken }), [appId, appToken]);
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
 
@@ -224,7 +221,7 @@ export function SfuTransferPage() {
     setSelectedFile(null);
     setConnectionCode("");
     setReceiverCodeInput("");
-    setSenderStatus("填写 App ID / App Token 并选择文件后创建 SFU 发布通道。");
+    setSenderStatus("选择文件后通过后端创建 SFU 发布通道。");
     setReceiverStatus("粘贴发送方 SFU 连接码后订阅 DataChannel。");
     setSenderError("");
     setReceiverError("");
@@ -306,17 +303,17 @@ export function SfuTransferPage() {
       closeSenderSession();
 
       const peer = createPeerConnection(updateSenderPeerState);
-      const session = await createCallsSession(credentials, peer);
+      const session = await createCallsSession(peer);
       senderSessionRef.current = session;
       setPublisherSessionId(session.id);
 
       setSenderStatus("正在建立 SFU DataChannel transport...");
-      await establishDataChannelTransport(credentials, session);
+      await establishDataChannelTransport(session);
 
       const channelName = `file-${createStableId()}`;
       setDataChannelName(channelName);
       setSenderStatus("正在向 SFU 注册本地 DataChannel...");
-      const channel = await createPublisherChannel(credentials, session, channelName);
+      const channel = await createPublisherChannel(session, channelName);
       attachSenderChannel(channel);
       await waitForDataChannelOpen(channel, peer, { timeoutMs: channelOpenTimeoutMs });
 
@@ -360,15 +357,15 @@ export function SfuTransferPage() {
       setReceiverStatus("正在创建接收方 Cloudflare SFU session...");
 
       const peer = createPeerConnection(updateReceiverPeerState);
-      const session = await createCallsSession(credentials, peer);
+      const session = await createCallsSession(peer);
       receiverSessionRef.current = session;
       setSubscriberSessionId(session.id);
 
       setReceiverStatus("正在建立接收方 SFU DataChannel transport...");
-      await establishDataChannelTransport(credentials, session);
+      await establishDataChannelTransport(session);
 
       setReceiverStatus("正在订阅发送方 DataChannel...");
-      const channel = await createSubscriberChannel(credentials, session, code.publisherSessionId, code.dataChannelName);
+      const channel = await createSubscriberChannel(session, code.publisherSessionId, code.dataChannelName);
       attachReceiverChannel(channel);
       await waitForDataChannelOpen(channel, peer, { timeoutMs: channelOpenTimeoutMs });
       setReceiverStatus("已订阅 SFU DataChannel，等待发送方传输文件。");
@@ -521,14 +518,14 @@ export function SfuTransferPage() {
   const receiverReady = receiverChannelState === "open";
   const codeSize = connectionCode ? `${connectionCode.length.toLocaleString()} 字符` : "";
   const steps: TransferStepItem[] = [
-    { label: "凭证", meta: appId && appToken ? "已填写" : "等待填写", icon: Server, active: Boolean(appId && appToken) },
+    { label: "会话", meta: publisherSessionId || subscriberSessionId ? "已创建" : "等待创建", icon: Server, active: Boolean(publisherSessionId || subscriberSessionId) },
     { label: "发布", meta: publisherSessionId ? "已创建" : "等待创建", icon: UploadCloud, active: Boolean(publisherSessionId) },
     { label: "订阅", meta: receiverReady ? "已订阅" : "等待订阅", icon: Link2, active: receiverReady },
     { label: "文件", meta: progress >= 100 ? "已完成" : progress > 0 ? "传输中" : "等待传输", icon: Check, active: progress >= 100 },
   ];
   const details: MetricItem[] = [
     { label: "连接类型", value: "Cloudflare SFU DataChannel", icon: Link2 },
-    { label: "API", value: "rtc.live.cloudflare.com/v1", icon: Server },
+    { label: "API", value: callsApiOrigin, icon: Server },
     { label: "发布 Session", value: publisherSessionId || "未创建", icon: UploadCloud, active: Boolean(publisherSessionId) },
     { label: "订阅 Session", value: subscriberSessionId || "未创建", icon: Download, active: Boolean(subscriberSessionId) },
     { label: "发送端状态", value: `${senderPeerState} / ${senderIceState}`, icon: Circle, active: senderPeerState === "connected" },
@@ -615,10 +612,6 @@ export function SfuTransferPage() {
 
           {mode === "send" && (
             <div className="grid gap-4">
-              <div className="adaptive-field-grid">
-                <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
-                <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
-              </div>
               <TextArea
                 label={`发送方 SFU 连接码 ${codeSize}`}
                 value={connectionCode}
@@ -646,10 +639,6 @@ export function SfuTransferPage() {
 
           {mode === "receive" && (
             <div className="grid gap-4">
-              <div className="adaptive-field-grid">
-                <TextInput label="App ID" value={appId} onChange={setAppId} placeholder="Cloudflare Realtime App ID" />
-                <TextInput label="App Token" value={appToken} onChange={setAppToken} placeholder="Bearer token" type="password" />
-              </div>
               <TextArea
                 label="发送方 SFU 连接码"
                 value={receiverCodeInput}

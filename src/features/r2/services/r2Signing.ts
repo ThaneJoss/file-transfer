@@ -1,10 +1,10 @@
-import { createStableId } from "../../../lib/browser/stableId";
-
 export type R2Credentials = {
   accountId: string;
   bucket: string;
+  endpoint: string;
   accessKeyId: string;
   secretAccessKey: string;
+  sessionToken: string;
 };
 
 const region = "auto";
@@ -19,25 +19,6 @@ function arrayBufferFromBytes(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-export function sanitizeObjectSegment(value: string) {
-  return value
-    .trim()
-    .replace(/[\\/#?]+/g, "-")
-    .replace(/\s+/g, " ")
-    .slice(0, 160);
-}
-
-export function normalizePrefix(prefix: string) {
-  return prefix.trim().replace(/^\/+|\/+$/g, "");
-}
-
-export function buildObjectKey(prefix: string, file: Pick<File, "name">) {
-  const safePrefix = normalizePrefix(prefix) || "file-transfer";
-  const date = new Date().toISOString().slice(0, 10);
-  const name = sanitizeObjectSegment(file.name) || "download";
-  return `${safePrefix}/${date}/${createStableId()}-${name}`;
-}
-
 function encodePathSegment(segment: string) {
   return encodeURIComponent(segment).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
@@ -46,12 +27,12 @@ export function canonicalUri(bucket: string, objectKey: string) {
   return `/${encodePathSegment(bucket)}/${objectKey.split("/").map(encodePathSegment).join("/")}`;
 }
 
-export function r2Endpoint(accountId: string) {
-  return `https://${accountId.trim()}.r2.cloudflarestorage.com`;
+export function r2Endpoint(credentials: Pick<R2Credentials, "endpoint">) {
+  return credentials.endpoint.trim().replace(/\/+$/, "");
 }
 
-export function r2ObjectUrl(credentials: Pick<R2Credentials, "accountId" | "bucket">, objectKey: string) {
-  return `${r2Endpoint(credentials.accountId)}${canonicalUri(credentials.bucket.trim(), objectKey)}`;
+export function r2ObjectUrl(credentials: Pick<R2Credentials, "endpoint" | "bucket">, objectKey: string) {
+  return `${r2Endpoint(credentials)}${canonicalUri(credentials.bucket.trim(), objectKey)}`;
 }
 
 function getAmzDates(date = new Date()) {
@@ -121,18 +102,20 @@ export async function signedR2Request({
   const bucket = credentials.bucket.trim();
   const accessKeyId = credentials.accessKeyId.trim();
   const secretAccessKey = credentials.secretAccessKey.trim();
-  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error("请填写 Account ID、Bucket、Access Key ID 和 Secret Access Key。");
+  const sessionToken = credentials.sessionToken.trim();
+  if (!accountId || !bucket || !accessKeyId || !secretAccessKey || !sessionToken || !credentials.endpoint.trim()) {
+    throw new Error("R2 临时凭证不完整，请重新申请。");
   }
 
-  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const host = new URL(r2Endpoint(credentials)).host;
   const { amzDate, dateStamp } = getAmzDates(now);
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date;x-amz-security-token";
   const canonicalHeaders = [
     `host:${host}`,
     `x-amz-content-sha256:${payloadHash}`,
     `x-amz-date:${amzDate}`,
+    `x-amz-security-token:${sessionToken}`,
     "",
   ].join("\n");
   const canonicalRequest = [
@@ -156,12 +139,13 @@ export async function signedR2Request({
     Authorization: authorization,
     "x-amz-content-sha256": payloadHash,
     "x-amz-date": amzDate,
+    "x-amz-security-token": sessionToken,
   });
   if (contentType) headers.set("Content-Type", contentType);
 
   return {
     canonicalRequest,
-    url: `${r2Endpoint(accountId)}${canonicalUri(bucket, objectKey)}`,
+    url: `${r2Endpoint(credentials)}${canonicalUri(bucket, objectKey)}`,
     headers,
   };
 }
@@ -183,14 +167,15 @@ export async function presignedR2Url({
   const bucket = credentials.bucket.trim();
   const accessKeyId = credentials.accessKeyId.trim();
   const secretAccessKey = credentials.secretAccessKey.trim();
-  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) {
-    throw new Error("请填写 Account ID、Bucket、Access Key ID 和 Secret Access Key。");
+  const sessionToken = credentials.sessionToken.trim();
+  if (!accountId || !bucket || !accessKeyId || !secretAccessKey || !sessionToken || !credentials.endpoint.trim()) {
+    throw new Error("R2 临时凭证不完整，请重新申请。");
   }
   if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
     throw new Error("预签名下载链接有效期必须是 1 到 604800 秒。");
   }
 
-  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const host = new URL(r2Endpoint(credentials)).host;
   const { amzDate, dateStamp } = getAmzDates(now);
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const payloadHash = "UNSIGNED-PAYLOAD";
@@ -200,6 +185,7 @@ export async function presignedR2Url({
     "X-Amz-Credential": `${accessKeyId}/${credentialScope}`,
     "X-Amz-Date": amzDate,
     "X-Amz-Expires": String(expiresIn),
+    "X-Amz-Security-Token": sessionToken,
     "X-Amz-SignedHeaders": "host",
   };
   const canonicalRequest = [
@@ -218,7 +204,7 @@ export async function presignedR2Url({
   ].join("\n");
   const signingKey = await getSigningKey(secretAccessKey, dateStamp);
   const signature = bytesToHex(await hmac(signingKey, stringToSign));
-  return `${r2Endpoint(accountId)}${canonicalUri(bucket, objectKey)}?${canonicalQueryString({
+  return `${r2Endpoint(credentials)}${canonicalUri(bucket, objectKey)}?${canonicalQueryString({
     ...query,
     "X-Amz-Signature": signature,
   })}`;

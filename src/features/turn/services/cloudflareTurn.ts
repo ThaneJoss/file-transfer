@@ -1,6 +1,8 @@
+import { apiJson } from "../../../lib/api/client";
+
 export type CloudflareTurnResponse = {
   iceServers?: unknown;
-  errors?: Array<{ message?: string }>;
+  expiresAt?: string;
 };
 
 export function normalizeIceServers(value: unknown): RTCIceServer[] {
@@ -28,24 +30,8 @@ export function normalizeIceServers(value: unknown): RTCIceServer[] {
   });
 }
 
-export async function generateCloudflareTurnIceServers(keyId: string, apiToken: string, ttl: number) {
-  const response = await fetch(
-    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ ttl }),
-    },
-  );
-  const data = (await response.json().catch(() => ({}))) as CloudflareTurnResponse;
-  if (!response.ok) {
-    const message = data.errors?.map((error) => error.message).filter(Boolean).join("；");
-    throw new Error(message || `Cloudflare TURN 凭证生成失败：HTTP ${response.status}`);
-  }
-
+export async function generateCloudflareTurnIceServers(ttlSeconds: number) {
+  const data = await apiJson<CloudflareTurnResponse>("/v1/turn/credentials", "POST", { ttlSeconds });
   const iceServers = normalizeIceServers(data.iceServers);
   if (iceServers.length === 0) {
     throw new Error("Cloudflare 响应里没有可用的 iceServers。");

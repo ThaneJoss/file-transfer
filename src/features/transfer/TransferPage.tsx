@@ -176,8 +176,6 @@ const turnIceGatheringTimeoutMs = 90000;
 const turnProbeGatheringTimeoutMs = 15000;
 const channelOpenTimeoutMs = 18000;
 const turnChannelOpenTimeoutMs = 90000;
-const defaultTurnKeyId = "";
-const defaultTurnApiToken = "";
 const turnTransports: TurnTransport[] = ["udp", "tcp"];
 
 async function encodeSignal(payload: SignalPayload) {
@@ -711,8 +709,6 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const [stunProbeSummary, setStunProbeSummary] = useState<CandidateSummary>(emptyCandidateSummary);
   const [senderSelectedPair, setSenderSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
   const [receiverSelectedPair, setReceiverSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
-  const [turnKeyId, setTurnKeyId] = useState(defaultTurnKeyId);
-  const [turnApiToken, setTurnApiToken] = useState(defaultTurnApiToken);
   const [turnTtl, setTurnTtl] = useState("3600");
   const [turnIceServers, setTurnIceServers] = useState<RTCIceServer[]>([]);
   const [turnTransport, setTurnTransport] = useState<TurnTransport>("udp");
@@ -1025,14 +1021,8 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
 
   async function generateTurnCredentials() {
     if (variant !== "turn") return;
-    const keyId = turnKeyId.trim();
-    const apiToken = turnApiToken.trim();
     const ttl = Number(turnTtl);
 
-    if (!keyId || !apiToken) {
-      setTurnCredentialError("请填写 Cloudflare TURN Key ID 和 API Token。");
-      return;
-    }
     if (!Number.isInteger(ttl) || ttl < 60 || ttl > 86400) {
       setTurnCredentialError("TTL 请填写 60 到 86400 秒之间的整数。");
       return;
@@ -1045,7 +1035,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setStunProbeSummary(emptyCandidateSummary);
       setTurnProbeTransportSummary(emptyTurnTransportSummary);
       setStunProbeError("");
-      const iceServers = await generateCloudflareTurnIceServers(keyId, apiToken, ttl);
+      const iceServers = await generateCloudflareTurnIceServers(ttl);
       const nextRtcConfig: RTCConfiguration = { iceServers, iceTransportPolicy: "relay" };
       setTurnIceServers(iceServers);
       setTurnCredentialStatus(`已生成 ${iceServers.length} 组 TURN iceServers，TTL ${ttl} 秒。`);
@@ -1645,7 +1635,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
               <div className="mb-4 grid min-w-0 gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
                 <div className="inline-card-header">
                   <div className="min-w-0">
-                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">Cloudflare TURN Credentials</h3>
+                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">临时 TURN 凭证</h3>
                     <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={turnCredentialError || turnCredentialStatus}>
                       {turnCredentialError || turnCredentialStatus}
                     </p>
@@ -1655,9 +1645,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                     生成
                   </SecondaryButton>
                 </div>
-                <div className="adaptive-field-grid">
-                  <TextInput label="Key ID" value={turnKeyId} onChange={setTurnKeyId} placeholder="Cloudflare TURN key id" />
-                  <TextInput label="API Token" value={turnApiToken} onChange={setTurnApiToken} placeholder="Bearer token" type="password" />
+                <div className="max-w-[260px]">
                   <TextInput label="TTL 秒" value={turnTtl} onChange={setTurnTtl} type="number" min={60} max={86400} />
                 </div>
               </div>
