@@ -1,5 +1,5 @@
-import { createR2Page } from "../util/createR2Page";
+import { R2TransferPage } from "../features/r2/R2TransferPage";
 
-const R2Page = createR2Page();
-
-export default R2Page;
+export default function R2Page() {
+  return <R2TransferPage />;
+}

@@ -1,5 +1,5 @@
-import { createSfuPage } from "../util/createSfuPage";
+import { SfuTransferPage } from "../features/sfu/SfuTransferPage";
 
-const SfuPage = createSfuPage();
-
-export default SfuPage;
+export default function SfuPage() {
+  return <SfuTransferPage />;
+}

@@ -16,8 +16,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
-import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
+import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
 import {
   buildObjectKey,
   formatFetchError,
@@ -26,7 +26,7 @@ import {
   r2ObjectUrl,
   sha256Hex,
   signedR2Request,
-} from "../features/r2/services/r2Signing";
+} from "./services/r2Signing";
 import {
   ActionPanel,
   ConnectionDetails,
@@ -40,11 +40,11 @@ import {
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
-} from "../layout/TransferLayout";
-import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
-import { copyText } from "../lib/browser/clipboard";
-import { saveBlob } from "../lib/browser/download";
-import { formatBytes, formatPercent } from "../lib/files/format";
+} from "../../layout/TransferLayout";
+import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
+import { copyText } from "../../lib/browser/clipboard";
+import { saveBlob } from "../../lib/browser/download";
+import { formatBytes, formatPercent } from "../../lib/files/format";
 
 type R2ConnectionCode = {
   kind: "cloudflare-r2-file-v1";
@@ -97,8 +97,7 @@ async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
   return payload;
 }
 
-export function createR2Page() {
-  return function R2Page() {
+export function R2TransferPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
 
@@ -550,5 +549,4 @@ export function createR2Page() {
       </FilesPanel>
     </TransferPageGrid>
   );
-  };
 }

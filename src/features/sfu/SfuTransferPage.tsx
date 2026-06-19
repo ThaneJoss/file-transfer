@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
 import {
   CallsSession,
   createCallsSession,
@@ -26,9 +26,9 @@ import {
   createSubscriberChannel,
   establishDataChannelTransport,
   SfuCredentials,
-} from "../features/sfu/services/callsApi";
-import { decodeConnectionPayload, encodeConnectionPayload } from "../features/transfer/protocol/connectionCode";
-import { waitForBuffer, waitForDataChannelOpen } from "../features/transfer/services/dataChannel";
+} from "./services/callsApi";
+import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
+import { waitForBuffer, waitForDataChannelOpen } from "../transfer/services/dataChannel";
 import {
   ActionPanel,
   ConnectionDetails,
@@ -42,12 +42,12 @@ import {
   TransferPageGrid,
   TransferSteps,
   UploadPanel,
-} from "../layout/TransferLayout";
-import type { MetricItem, TransferStepItem } from "../layout/TransferLayout";
-import { copyText } from "../lib/browser/clipboard";
-import { saveBlob } from "../lib/browser/download";
-import { createStableId } from "../lib/browser/stableId";
-import { formatBytes, formatPercent } from "../lib/files/format";
+} from "../../layout/TransferLayout";
+import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
+import { copyText } from "../../lib/browser/clipboard";
+import { saveBlob } from "../../lib/browser/download";
+import { createStableId } from "../../lib/browser/stableId";
+import { formatBytes, formatPercent } from "../../lib/files/format";
 
 type TransferMeta = {
   kind: "meta";
@@ -122,8 +122,7 @@ function createPeerConnection(onState: (peer: RTCPeerConnection) => void) {
   return peer;
 }
 
-export function createSfuPage() {
-  return function SfuPage() {
+export function SfuTransferPage() {
   const senderSessionRef = useRef<CallsSession | null>(null);
   const receiverSessionRef = useRef<CallsSession | null>(null);
   const senderChannelRef = useRef<RTCDataChannel | null>(null);
@@ -711,5 +710,4 @@ export function createSfuPage() {
       </FilesPanel>
     </TransferPageGrid>
   );
-  };
 }

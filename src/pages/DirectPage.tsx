@@ -1,5 +1,5 @@
-import { createTransferPage } from "../util/createTransferPage";
+import { TransferPage } from "../features/transfer/TransferPage";
 
-const DirectPage = createTransferPage("direct");
-
-export default DirectPage;
+export default function DirectPage() {
+  return <TransferPage variant="direct" />;
+}
