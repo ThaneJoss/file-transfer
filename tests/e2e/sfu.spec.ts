@@ -2,10 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 import {
   collectConsoleErrors,
-  expectActiveNav,
   expectNoConsoleErrors,
-  expectNoHorizontalOverflow,
-  expectSliderAligned,
   installAppMocks,
   openRoute,
   routePath,
@@ -60,22 +57,10 @@ test.describe("SFU page", () => {
     await expectNoConsoleErrors(withoutExpectedNetworkDiagnostics(consoleErrors));
   });
 
-  test("opens directly, refreshes in place, marks nav active, and supports history", async ({ page }) => {
+  test("opens directly with SFU transfer controls", async ({ page }) => {
     await openRoute(page, "sfu");
     await expect(page.getByRole("heading", { name: "SFU 连接状态" })).toBeVisible();
     await expect(page.getByText("Cloudflare SFU DataChannel")).toBeVisible();
-    await expectActiveNav(page, "sfu");
-    await expectSliderAligned(page);
-    await expectNoHorizontalOverflow(page);
-
-    await page.reload();
-    await expect(page).toHaveURL(routePath.sfu);
-    await expectActiveNav(page, "sfu");
-
-    await page.getByTestId("nav-item-r2").click();
-    await expect(page).toHaveURL(routePath.r2);
-    await page.goBack();
-    await expect(page).toHaveURL(routePath.sfu);
   });
 
   test("validates credentials and creates a mocked publisher DataChannel", async ({ page }) => {

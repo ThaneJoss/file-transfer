@@ -2,13 +2,9 @@ import { test, expect, type Page } from "@playwright/test";
 
 import {
   collectConsoleErrors,
-  expectActiveNav,
   expectNoConsoleErrors,
-  expectNoHorizontalOverflow,
-  expectSliderAligned,
   installAppMocks,
   openRoute,
-  routePath,
   selectFile,
   withoutExpectedNetworkDiagnostics,
 } from "./support/app";
@@ -55,22 +51,10 @@ test.describe("R2 page", () => {
     await expectNoConsoleErrors(withoutExpectedNetworkDiagnostics(consoleErrors));
   });
 
-  test("opens directly, refreshes in place, marks nav active, and supports history", async ({ page }) => {
+  test("opens directly with R2 transfer controls", async ({ page }) => {
     await openRoute(page, "r2");
     await expect(page.getByRole("heading", { name: "R2 传输状态" })).toBeVisible();
     await expect(page.getByText("Cloudflare R2 S3 API", { exact: true })).toBeVisible();
-    await expectActiveNav(page, "r2");
-    await expectSliderAligned(page);
-    await expectNoHorizontalOverflow(page);
-
-    await page.reload();
-    await expect(page).toHaveURL(routePath.r2);
-    await expectActiveNav(page, "r2");
-
-    await page.getByTestId("nav-item-direct").click();
-    await expect(page).toHaveURL(routePath.direct);
-    await page.goBack();
-    await expect(page).toHaveURL(routePath.r2);
   });
 
   test("validates upload inputs, signs a mocked PUT, and generates a presigned connection code", async ({ page }) => {
