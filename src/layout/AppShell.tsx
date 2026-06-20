@@ -1,7 +1,7 @@
 import { Cloud, LogIn, LogOut } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../lib/auth/AuthProvider";
 
@@ -24,7 +24,7 @@ export const routes: AppRoute[] = [
 export function AppShell({
   children,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const location = useLocation();
   const { session, usage, signOut } = useAuth();
@@ -116,7 +116,7 @@ export function AppShell({
       </header>
 
       <section className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto" data-testid="page-slot">
-        {children}
+        {children ?? <Outlet />}
       </section>
     </main>
   );

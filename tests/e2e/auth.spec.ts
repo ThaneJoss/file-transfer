@@ -49,6 +49,9 @@ test.describe("authentication", () => {
 
     await page.goto("/turn");
     await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByTestId("login-page")).toBeVisible();
+    await expect(page.getByTestId("app-shell")).toHaveCount(0);
+    await expect(page.getByTestId("app-nav")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Passkey 登录" })).toBeVisible();
     await expect(page.getByLabel("Email")).toHaveCount(0);
     await expect(page.getByLabel("Password")).toHaveCount(0);
