@@ -1,6 +1,8 @@
 # 文件中转站
 
-浏览器文件传输工具，包含 Direct、STUN、TURN、SFU 和 R2 五种页面。Direct/STUN 公开使用，TURN/SFU/R2 通过 Better Auth session 访问后端控制面。
+浏览器文件传输工具，包含 Direct、STUN、TURN、SFU 和 R2 五种页面。Direct/STUN
+公开使用；登录后可使用 8 位取件码自动交换信令。TURN/SFU/R2 通过 Better Auth
+session 访问后端控制面。
 
 ## Scripts
 
@@ -51,7 +53,7 @@ live 测试默认跳过。不要把真实 session、临时凭证写入源码、f
 VITE_API_BASE_URL=http://localhost:8787 pnpm dev
 ```
 
-注册、登录、退出和 session 由 Better Auth 提供，前端只提供 Passkey 鉴权。注册时前端先调用 `POST /v1/passkey/registration-context` 取得一次性 `context`，再交给 Better Auth Passkey 注册；登录直接调用 Better Auth Passkey。所有后端 API 请求携带 session cookie；页面顶部展示当前用户与 TURN/R2/SFU 事件数。
+注册、登录、退出和 session 由 Better Auth 提供，前端只提供 Passkey 鉴权。注册时前端先调用 `POST /v1/passkey/registration-context` 取得一次性 `context`，再交给 Better Auth Passkey 注册；登录直接调用 Better Auth Passkey。所有后端 API 请求携带 session cookie；用户页展示 Direct、STUN、TURN、SFU、R2 流量和 Durable 取件码请求次数及额度。
 
 本地 Worker 鉴权环境需要与前端 origin 匹配：
 
@@ -73,6 +75,15 @@ POST /v1/turn/credentials
 ```
 
 拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件，临时 TURN 凭证不会写入连接码。
+
+## Direct/STUN 取件码
+
+登录用户选择文件后，前端生成 Offer，并调用 `POST /v1/pickups` 创建唯一的 8 位
+取件码。接收方输入取件码读取 Offer、生成 Answer 并写回，发送方轮询 Answer 后
+自动建立 DataChannel。Durable Object 只保存一小时内的信令；文件始终点对点传输。
+
+未登录用户不会看到取件码输入或生成入口，仍可使用原有手动 Offer/Answer 流程。
+Direct/STUN 发送完成后，发送端通过 `/v1/usage/transfers` 幂等上报实际文件字节。
 
 ## Security
 

@@ -5,7 +5,8 @@ import { API_UNAUTHORIZED_EVENT, API_USAGE_CHANGED_EVENT, apiRequest } from "../
 import { authClient } from "./client";
 import type { AuthSession } from "./client";
 
-export type UsageService = "turn" | "sfu" | "r2";
+export type UsageService = "direct" | "stun" | "turn" | "sfu" | "r2" | "durable";
+export type UsageUnit = "bytes" | "requests";
 
 export type UsagePeriod = {
   start: string;
@@ -14,6 +15,9 @@ export type UsagePeriod = {
 };
 
 export type UsageServiceSummary = {
+  unit: UsageUnit;
+  usage: number;
+  quota: number | null;
   bytes: number;
   quotaBytes: number | null;
 };
@@ -23,12 +27,17 @@ export type UsageSnapshot = {
   services: Record<UsageService, UsageServiceSummary>;
   totalBytes: number;
   totalQuotaBytes: number | null;
+  totals: Record<UsageUnit, number>;
+  quotas: Record<UsageUnit, number | null>;
 };
 
 type UsageApiRow = {
   service: UsageService;
-  bytes: number;
-  quotaBytes: number | null;
+  unit?: UsageUnit;
+  usage?: number;
+  quota?: number | null;
+  bytes?: number;
+  quotaBytes?: number | null;
 };
 
 type UsageApiResponse = {
@@ -36,6 +45,8 @@ type UsageApiResponse = {
   summary: UsageApiRow[];
   totalBytes: number;
   totalQuotaBytes: number | null;
+  totals?: Record<UsageUnit, number>;
+  quotas?: Record<UsageUnit, number | null>;
 };
 
 type AuthContextValue = {
@@ -48,13 +59,15 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
 };
 
-const usageServices = ["turn", "sfu", "r2"] as const satisfies readonly UsageService[];
+const usageServices = ["direct", "stun", "turn", "sfu", "r2", "durable"] as const satisfies readonly UsageService[];
 
 const emptyUsage: UsageSnapshot = {
   period: null,
   services: createEmptyUsageServices(),
   totalBytes: 0,
   totalQuotaBytes: null,
+  totals: { bytes: 0, requests: 0 },
+  quotas: { bytes: null, requests: null },
 };
 
 const defaultContext: AuthContextValue = {
@@ -137,35 +150,59 @@ export function useAuth() {
 
 function createEmptyUsageServices(): Record<UsageService, UsageServiceSummary> {
   return {
-    turn: { bytes: 0, quotaBytes: null },
-    sfu: { bytes: 0, quotaBytes: null },
-    r2: { bytes: 0, quotaBytes: null },
+    direct: emptyService("bytes"),
+    stun: emptyService("bytes"),
+    turn: emptyService("bytes"),
+    sfu: emptyService("bytes"),
+    r2: emptyService("bytes"),
+    durable: emptyService("requests"),
   };
+}
+
+function emptyService(unit: UsageUnit): UsageServiceSummary {
+  return { unit, usage: 0, quota: null, bytes: 0, quotaBytes: null };
 }
 
 function normalizeUsageResponse(response: UsageApiResponse): UsageSnapshot {
   const services = createEmptyUsageServices();
   for (const row of response.summary) {
     if (!usageServices.includes(row.service)) continue;
+    const unit = row.unit ?? (row.service === "durable" ? "requests" : "bytes");
+    const usage = normalizeQuantity(row.usage ?? row.bytes ?? 0);
+    const quota = normalizeNullableQuantity(row.quota ?? row.quotaBytes);
     services[row.service] = {
-      bytes: normalizeBytes(row.bytes),
-      quotaBytes: normalizeNullableBytes(row.quotaBytes),
+      unit,
+      usage,
+      quota,
+      bytes: unit === "bytes" ? usage : 0,
+      quotaBytes: unit === "bytes" ? quota : null,
     };
   }
+
+  const totalBytes = normalizeQuantity(response.totals?.bytes ?? response.totalBytes);
+  const totalQuotaBytes = normalizeNullableQuantity(response.quotas?.bytes ?? response.totalQuotaBytes);
 
   return {
     period: response.period,
     services,
-    totalBytes: normalizeBytes(response.totalBytes),
-    totalQuotaBytes: normalizeNullableBytes(response.totalQuotaBytes),
+    totalBytes,
+    totalQuotaBytes,
+    totals: {
+      bytes: totalBytes,
+      requests: normalizeQuantity(response.totals?.requests ?? services.durable.usage),
+    },
+    quotas: {
+      bytes: totalQuotaBytes,
+      requests: normalizeNullableQuantity(response.quotas?.requests ?? services.durable.quota),
+    },
   };
 }
 
-function normalizeBytes(value: number) {
+function normalizeQuantity(value: number) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
-function normalizeNullableBytes(value: number | null | undefined) {
+function normalizeNullableQuantity(value: number | null | undefined) {
   if (value == null) return null;
-  return normalizeBytes(value);
+  return normalizeQuantity(value);
 }

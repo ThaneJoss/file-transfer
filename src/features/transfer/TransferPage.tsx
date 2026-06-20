@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
 import { generateCloudflareTurnIceServers } from "../turn/services/cloudflareTurn";
 import { decodeConnectionPayload, encodeConnectionPayload } from "./protocol/connectionCode";
 import { waitForBuffer, waitForDataChannelOpen } from "./services/dataChannel";
@@ -38,9 +38,17 @@ import {
 } from "../../layout/TransferLayout";
 import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
 import { notifyApiUsageChanged } from "../../lib/api/client";
+import { useAuth } from "../../lib/auth/AuthProvider";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
 import { formatBytes, formatPercent } from "../../lib/files/format";
+import {
+  createPickup,
+  getPickup,
+  getPickupAnswer,
+  recordTransferUsage,
+  submitPickupAnswer,
+} from "./services/pickupApi";
 
 type SignalPayload = {
   kind: SignalKind;
@@ -529,6 +537,7 @@ async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<Select
 }
 
 export function TransferPage({ variant }: { variant: TransferVariant }) {
+  const { session } = useAuth();
   const config = transferVariantConfig[variant];
   const protocolLabel = variant === "direct" ? "Direct" : variant.toUpperCase();
   const signalPrefix = variant === "direct" ? "" : `${protocolLabel} `;
@@ -544,6 +553,9 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const sendInFlightRef = useRef(false);
   const senderFileInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedFileRef = useRef<File | null>(null);
+  const pickupPollGenerationRef = useRef(0);
+  const transferIdRef = useRef(crypto.randomUUID());
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [senderOffer, setSenderOffer] = useState("");
@@ -579,6 +591,12 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const [receiverSelectedPair, setReceiverSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
   const [turnIceServers, setTurnIceServers] = useState<RTCIceServer[]>([]);
   const [isGeneratingTurnCredentials, setIsGeneratingTurnCredentials] = useState(false);
+  const [senderPickupCode, setSenderPickupCode] = useState("");
+  const [receiverPickupInput, setReceiverPickupInput] = useState("");
+  const [receiverPickupCode, setReceiverPickupCode] = useState("");
+  const [pickupExpiresAt, setPickupExpiresAt] = useState<number | null>(null);
+  const [isPickupBusy, setIsPickupBusy] = useState(false);
+  const pickupEnabled = Boolean(session?.user) && (variant === "direct" || variant === "stun");
 
   const activeRtcConfig = useMemo<RTCConfiguration>(
     () =>
@@ -598,6 +616,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     return () => {
       senderPeerRef.current?.close();
       receiverPeerRef.current?.close();
+      pickupPollGenerationRef.current += 1;
       receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
     };
   }, []);
@@ -717,7 +736,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     { label: "进度", value: formatPercent(progress), icon: Gauge, progress },
   ];
 
-  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending && !isGeneratingTurnCredentials;
+  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending && !isGeneratingTurnCredentials && !isPickupBusy;
   const senderCanApplyAnswer = Boolean(senderAnswerInput.trim() && senderPeerRef.current);
   const receiverCanCreateAnswer = Boolean(receiverOfferInput.trim()) && !isGeneratingTurnCredentials;
 
@@ -766,7 +785,9 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   }
 
   function resetSender() {
+    pickupPollGenerationRef.current += 1;
     closeSenderPeer();
+    selectedFileRef.current = null;
     setSelectedFile(null);
     setSenderOffer("");
     setSenderAnswerInput("");
@@ -778,6 +799,9 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     setIsSending(false);
     sendInFlightRef.current = false;
     setSenderHandshakeStage("offer");
+    setSenderPickupCode("");
+    setPickupExpiresAt(null);
+    setIsPickupBusy(false);
   }
 
   function resetReceiver() {
@@ -789,6 +813,9 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     setReceiverCandidateSummary(emptyCandidateSummary);
     setReceiverProgress(0);
     setReceivedBytes(0);
+    setReceiverPickupInput("");
+    setReceiverPickupCode("");
+    setIsPickupBusy(false);
   }
 
   async function prepareRtcConfig(role: "sender" | "receiver") {
@@ -831,11 +858,17 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   }
 
   function handleFile(file: File | null) {
+    selectedFileRef.current = file;
     setSelectedFile(file);
     setSenderProgress(0);
     setSentBytes(0);
     if (file) {
-      setSenderStatus(`已选择 ${file.name}，可以生成 ${signalPrefix}Offer。`);
+      if (pickupEnabled) {
+        setSenderStatus(`已选择 ${file.name}，正在生成取件码...`);
+        void generateOffer(file);
+      } else {
+        setSenderStatus(`已选择 ${file.name}，可以生成 ${signalPrefix}Offer。`);
+      }
     }
   }
 
@@ -885,14 +918,56 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     });
   }
 
-  async function generateOffer() {
-    if (!selectedFile) {
+  async function publishPickupOffer(encoded: string) {
+    if (!pickupEnabled || (variant !== "direct" && variant !== "stun")) return false;
+    setSenderStatus("Offer 已生成，正在写入 Durable Object...");
+    const pickup = await createPickup(variant, encoded);
+    setSenderPickupCode(pickup.code);
+    setPickupExpiresAt(pickup.expiresAt);
+    setSenderStatus(`取件码 ${pickup.code} 已生成，等待接收方输入。`);
+    startPickupAnswerPolling(pickup.code);
+    return true;
+  }
+
+  function startPickupAnswerPolling(code: string) {
+    const generation = pickupPollGenerationRef.current + 1;
+    pickupPollGenerationRef.current = generation;
+    const poll = async () => {
+      if (pickupPollGenerationRef.current !== generation) return;
+      try {
+        const result = await getPickupAnswer(code);
+        if (pickupPollGenerationRef.current !== generation) return;
+        if (result.answer) {
+          pickupPollGenerationRef.current += 1;
+          setSenderAnswerInput(result.answer);
+          setSenderStatus("已取得接收方 Answer，正在建立 DataChannel...");
+          await applyAnswerToSender(result.answer);
+          return;
+        }
+        window.setTimeout(() => void poll(), 2000);
+      } catch (error) {
+        if (pickupPollGenerationRef.current !== generation) return;
+        pickupPollGenerationRef.current += 1;
+        setSenderError(error instanceof Error ? error.message : "读取取件码 Answer 失败。");
+      }
+    };
+    window.setTimeout(() => void poll(), 1000);
+  }
+
+  async function generateOffer(fileOverride?: File) {
+    const file = fileOverride ?? selectedFile;
+    if (!file) {
       setSenderError("请先选择一个文件。");
       return;
     }
 
     try {
+      if (pickupEnabled) setIsPickupBusy(true);
       setSenderError("");
+      setSenderPickupCode("");
+      setPickupExpiresAt(null);
+      pickupPollGenerationRef.current += 1;
+      transferIdRef.current = crypto.randomUUID();
       const rtcConfig = await prepareRtcConfig("sender");
       setSenderStatus(config.offerGatheringStatus);
       setSenderOffer("");
@@ -995,16 +1070,23 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       });
       setSenderOffer(encoded);
       setSenderHandshakeStage("offer");
-      setSenderStatus(`步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`);
+      if (!(await publishPickupOffer(encoded))) {
+        setSenderStatus(`步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`);
+      }
     } catch (error) {
       setSenderError(formatStepError(variant, `步骤2 生成 ${config.offerCandidateLabel} 失败`, error, "生成 Offer 失败。"));
+    } finally {
+      if (pickupEnabled) setIsPickupBusy(false);
     }
   }
 
-  async function createAnswerFromOffer() {
+  async function createAnswerFromOffer(
+    offerOverride = receiverOfferInput,
+    pickupCodeOverride = receiverPickupCode,
+  ) {
     try {
       setReceiverError("");
-      const payload = await decodeSignal(receiverOfferInput);
+      const payload = await decodeSignal(offerOverride);
       if (payload.role !== "offer" || payload.description.type !== "offer") {
         throw new Error("粘贴的不是 Offer。");
       }
@@ -1119,13 +1201,43 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
         createdAt: Date.now(),
       });
       setReceiverAnswer(encoded);
-      setReceiverStatus(`步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`);
+      if (pickupCodeOverride) {
+        await submitPickupAnswer(pickupCodeOverride, encoded);
+        setReceiverStatus("Answer 已写入取件码，等待发送方建立 DataChannel。");
+      } else {
+        setReceiverStatus(`步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`);
+      }
     } catch (error) {
       setReceiverError(formatStepError(variant, `步骤2 生成 ${config.answerCandidateLabel} 失败`, error, "生成 Answer 失败。"));
     }
   }
 
-  async function applyAnswerToSender() {
+  async function receiveWithPickupCode() {
+    const code = receiverPickupInput.trim();
+    if (!/^\d{8}$/.test(code)) {
+      setReceiverError("取件码必须是 8 位数字。");
+      return;
+    }
+    if (variant !== "direct" && variant !== "stun") return;
+    try {
+      setIsPickupBusy(true);
+      setReceiverError("");
+      setReceiverStatus("正在读取取件码...");
+      const pickup = await getPickup(code);
+      if (pickup.variant !== variant) {
+        throw new Error(`该取件码属于 ${pickup.variant.toUpperCase()}，请打开对应页面。`);
+      }
+      setReceiverPickupCode(code);
+      setReceiverOfferInput(pickup.offer);
+      await createAnswerFromOffer(pickup.offer, code);
+    } catch (error) {
+      setReceiverError(error instanceof Error ? error.message : "读取取件码失败。");
+    } finally {
+      setIsPickupBusy(false);
+    }
+  }
+
+  async function applyAnswerToSender(answerOverride = senderAnswerInput) {
     try {
       setSenderError("");
       const peer = senderPeerRef.current;
@@ -1133,7 +1245,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
         throw new Error("请先生成 Offer。");
       }
 
-      const payload = await decodeSignal(senderAnswerInput);
+      const payload = await decodeSignal(answerOverride);
       if (payload.role !== "answer" || payload.description.type !== "answer") {
         throw new Error("粘贴的不是 Answer。");
       }
@@ -1179,6 +1291,16 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     }
   }
 
+  async function copyPickupCode() {
+    try {
+      setSenderError("");
+      await copyText(senderPickupCode);
+      setSenderStatus(`取件码 ${senderPickupCode} 已复制。`);
+    } catch (error) {
+      setSenderError(error instanceof Error ? error.message : "复制取件码失败。");
+    }
+  }
+
   async function copyReceiverAnswer() {
     try {
       setReceiverError("");
@@ -1189,7 +1311,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   }
 
   async function sendSelectedFile() {
-    const file = selectedFile;
+    const file = selectedFileRef.current;
     const channel = senderChannelRef.current;
     if (!file || !channel || channel.readyState !== "open" || isSending || sendInFlightRef.current || senderProgress >= 100) return;
 
@@ -1235,7 +1357,17 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setSentBytes(file.size);
       setSenderProgress(100);
       setSenderStatus("文件已发送完成。");
-      if (variant === "turn") notifyApiUsageChanged();
+      if ((variant === "direct" || variant === "stun") && session?.user) {
+        try {
+          await recordTransferUsage(variant, file.size, transferIdRef.current);
+        } catch (error) {
+          setSenderError(
+            `文件已发送完成，但流量上报失败：${error instanceof Error ? error.message : "未知错误"}`,
+          );
+        }
+      } else if (variant === "turn") {
+        notifyApiUsageChanged();
+      }
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "发送文件失败。");
     } finally {
@@ -1355,7 +1487,11 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
             <>
               <StatusPanelHeader
                 title="连接状态"
-                description={config.description}
+                description={
+                  pickupEnabled
+                    ? `${protocolLabel} DataChannel 传输，使用 8 位取件码自动交换 Offer / Answer。`
+                    : config.description
+                }
                 action={(
                   <SecondaryButton
                     onClick={() => {
@@ -1391,7 +1527,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
               <div className="grid gap-3">
                 <RoleOption
                   title="发送文件"
-                  description={`生成 ${signalPrefix}Offer，等待接收方 Answer`}
+                  description={pickupEnabled ? "选择文件后生成 8 位取件码" : `生成 ${signalPrefix}Offer，等待接收方 Answer`}
                   icon={UploadCloud}
                   selected={transferMode === "send"}
                   onClick={() => {
@@ -1401,10 +1537,11 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                 />
                 <RoleOption
                   title="接收文件"
-                  description={`粘贴 ${signalPrefix}Offer，生成 Answer`}
+                  description={pickupEnabled ? "输入 8 位取件码自动连接" : `粘贴 ${signalPrefix}Offer，生成 Answer`}
                   icon={Download}
                   selected={transferMode === "receive"}
                   onClick={() => {
+                    selectedFileRef.current = null;
                     setSelectedFile(null);
                     setSenderProgress(0);
                     setSentBytes(0);
@@ -1445,7 +1582,36 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
 
             {transferMode === "send" && !activeConnected && (
               <div className="grid gap-4">
-                {senderHandshakeStage === "offer" ? (
+                {pickupEnabled ? (
+                  <>
+                    <div className="grid min-h-[150px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] p-5 text-center">
+                      <div>
+                        <div className="text-sm font-bold text-[#526c92]">8 位取件码</div>
+                        <div
+                          className="mt-2 font-mono text-[36px] font-black tracking-[0.18em] text-[#061b3a]"
+                          data-testid="sender-pickup-code"
+                        >
+                          {senderPickupCode || (isPickupBusy ? "生成中" : "--------")}
+                        </div>
+                        <div className="mt-2 text-xs text-[#526c92]">
+                          {pickupExpiresAt
+                            ? `有效至 ${new Date(pickupExpiresAt).toLocaleTimeString("zh-CN")}`
+                            : "选择文件后自动生成"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <PrimaryButton onClick={() => void generateOffer()} disabled={!senderCanGenerateOffer}>
+                        <Send aria-hidden="true" size={17} />
+                        {senderPickupCode ? "重新生成取件码" : "生成取件码"}
+                      </PrimaryButton>
+                      <SecondaryButton onClick={() => void copyPickupCode()} disabled={!senderPickupCode}>
+                        <Copy aria-hidden="true" size={17} />
+                        复制取件码
+                      </SecondaryButton>
+                    </div>
+                  </>
+                ) : senderHandshakeStage === "offer" ? (
                   <>
                     <TextArea
                       label={`发送方 ${signalPrefix}Offer ${senderOfferSize}`}
@@ -1455,7 +1621,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                       readOnly
                     />
                     <div className="flex flex-wrap gap-3">
-                      <PrimaryButton onClick={generateOffer} disabled={!senderCanGenerateOffer}>
+                      <PrimaryButton onClick={() => void generateOffer()} disabled={!senderCanGenerateOffer}>
                         <Send aria-hidden="true" size={17} />
                         生成 {signalPrefix}Offer
                       </PrimaryButton>
@@ -1478,7 +1644,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                         <FileText aria-hidden="true" size={17} />
                         查看 {signalPrefix}Offer
                       </SecondaryButton>
-                      <PrimaryButton onClick={applyAnswerToSender} disabled={!senderCanApplyAnswer}>
+                      <PrimaryButton onClick={() => void applyAnswerToSender()} disabled={!senderCanApplyAnswer}>
                         <Link2 aria-hidden="true" size={17} />
                         发送
                       </PrimaryButton>
@@ -1491,7 +1657,25 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
 
             {transferMode === "receive" && !activeConnected && (
               <div className="grid gap-4">
-                {receiverAnswer ? (
+                {pickupEnabled ? (
+                  <>
+                    <TextInput
+                      label="8 位取件码"
+                      value={receiverPickupInput}
+                      onChange={(value) => setReceiverPickupInput(value.replace(/\D/g, "").slice(0, 8))}
+                      placeholder="输入发送方提供的 8 位数字"
+                    />
+                    <div className="flex flex-wrap gap-3">
+                      <PrimaryButton
+                        onClick={() => void receiveWithPickupCode()}
+                        disabled={receiverPickupInput.length !== 8 || isPickupBusy}
+                      >
+                        <Download aria-hidden="true" size={17} />
+                        {isPickupBusy ? "连接中..." : "取件并连接"}
+                      </PrimaryButton>
+                    </div>
+                  </>
+                ) : receiverAnswer ? (
                   <>
                     <TextArea
                       label={`接收方 ${signalPrefix}Answer ${receiverAnswerSize}`}
@@ -1520,7 +1704,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                       placeholder={`把发送方 ${signalPrefix}Offer 粘贴到这里`}
                     />
                     <div className="flex flex-wrap gap-3">
-                      <PrimaryButton onClick={createAnswerFromOffer} disabled={!receiverCanCreateAnswer}>
+                      <PrimaryButton onClick={() => void createAnswerFromOffer()} disabled={!receiverCanCreateAnswer}>
                         <Link2 aria-hidden="true" size={17} />
                         生成 {signalPrefix}Answer
                       </PrimaryButton>

@@ -6,6 +6,7 @@ import { PrimaryButton, SecondaryButton, StatusMessage, TextInput } from "../../
 import { authClient } from "../../lib/auth/client";
 import { useAuth } from "../../lib/auth/AuthProvider";
 import type { UsagePeriod, UsageService } from "../../lib/auth/AuthProvider";
+import type { UsageUnit } from "../../lib/auth/AuthProvider";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 
 const serviceRows: Array<{
@@ -13,9 +14,12 @@ const serviceRows: Array<{
   label: string;
   description: string;
 }> = [
+  { service: "direct", label: "Direct", description: "局域网/直连传输流量" },
+  { service: "stun", label: "STUN", description: "公网点对点传输流量" },
   { service: "turn", label: "TURN", description: "中继传输流量" },
   { service: "sfu", label: "SFU", description: "服务器转发流量" },
   { service: "r2", label: "R2", description: "对象存储上传/下载流量" },
+  { service: "durable", label: "Durable", description: "取件码信令请求次数" },
 ];
 
 export function UserUsagePage() {
@@ -119,19 +123,21 @@ export function UserUsagePage() {
           </form>
         )}
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <UsageMetric label="本月总流量" value={formatBytes(usage.totalBytes)} />
           <UsageMetric label="本月总额度" value={formatQuota(usage.totalQuotaBytes)} />
+          <UsageMetric label="Durable 请求" value={formatQuantity(usage.totals.requests, "requests")} />
+          <UsageMetric label="Durable 额度" value={formatQuotaByUnit(usage.quotas.requests, "requests")} />
         </div>
 
         {error && <div className="mt-4"><StatusMessage message={error} tone="error" /></div>}
         {notice && <div className="mt-4"><StatusMessage message={notice} tone="info" /></div>}
       </Panel>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {serviceRows.map((row) => {
           const summary = usage.services[row.service];
-          const quotaPercent = percentOfQuota(summary.bytes, summary.quotaBytes);
+          const quotaPercent = percentOfQuota(summary.usage, summary.quota);
           return (
             <Panel className="p-5" key={row.service} testId={`usage-card-${row.service}`}>
               <div className="flex min-w-0 items-start justify-between gap-3">
@@ -146,10 +152,10 @@ export function UserUsagePage() {
 
               <div className="mt-5">
                 <div className="text-[30px] font-extrabold leading-tight text-[#061b3a]">
-                  {formatBytes(summary.bytes)}
+                  {formatQuantity(summary.usage, summary.unit)}
                 </div>
                 <div className="mt-1 text-sm text-[#526c92]">
-                  额度 {formatQuota(summary.quotaBytes)}
+                  额度 {formatQuotaByUnit(summary.quota, summary.unit)}
                 </div>
               </div>
 
@@ -183,6 +189,14 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
 
 function formatQuota(quotaBytes: number | null) {
   return quotaBytes === null ? "未配置" : formatBytes(quotaBytes);
+}
+
+function formatQuantity(value: number, unit: UsageUnit) {
+  return unit === "bytes" ? formatBytes(value) : `${value.toLocaleString("zh-CN")} 次`;
+}
+
+function formatQuotaByUnit(quota: number | null, unit: UsageUnit) {
+  return quota === null ? "未配置" : formatQuantity(quota, unit);
 }
 
 function percentOfQuota(bytes: number, quotaBytes: number | null) {
