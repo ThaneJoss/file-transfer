@@ -206,11 +206,18 @@ export async function installAppMocks(
     route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
+        period: {
+          start: "2026-06-01T00:00:00.000Z",
+          end: "2026-06-20T04:00:00.000Z",
+          timezone: "UTC",
+        },
         summary: [
-          { service: "turn", action: "credential.issued", events: 2, quantity: 2 },
-          { service: "r2", action: "credential.issued", events: 3, quantity: 3 },
-          { service: "sfu", action: "session.create", events: 4, quantity: 4 },
+          { service: "turn", bytes: 2 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
+          { service: "sfu", bytes: 4 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
+          { service: "r2", bytes: 3 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
         ],
+        totalBytes: 9 * 1024 * 1024,
+        totalQuotaBytes: 30 * 1024 * 1024,
       }),
     }),
   );

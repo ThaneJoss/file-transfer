@@ -22,7 +22,11 @@ async function chooseDownloadMode(page: Page) {
 async function mockR2Credentials(page: Page) {
   await page.route(`${apiBaseUrl}/v1/r2/credentials`, async (route) => {
     const request = route.request();
-    expect(await request.postDataJSON()).toEqual({ fileName: expect.any(String), ttlSeconds: 900 });
+    expect(await request.postDataJSON()).toEqual({
+      fileName: expect.any(String),
+      fileSizeBytes: expect.any(Number),
+      ttlSeconds: 900,
+    });
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({

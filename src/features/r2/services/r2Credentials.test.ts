@@ -9,7 +9,7 @@ describe("R2 temporary credentials", () => {
     server.use(
       http.post("https://api.file.thanejoss.com/v1/r2/credentials", async ({ request }) => {
         expect(request.credentials).toBe("include");
-        expect(await request.json()).toEqual({ fileName: "测试.txt", ttlSeconds: 900 });
+        expect(await request.json()).toEqual({ fileName: "测试.txt", fileSizeBytes: 1024, ttlSeconds: 900 });
         return HttpResponse.json({
           accountId: "account",
           bucket: "bucket",
@@ -23,7 +23,7 @@ describe("R2 temporary credentials", () => {
       }),
     );
 
-    const result = await requestR2Credentials("测试.txt");
+    const result = await requestR2Credentials("测试.txt", 1024);
     expect(result.objectKey).toBe("users/server-generated-key.txt");
     expect(result.sessionToken).toBe("temporary-session");
   });

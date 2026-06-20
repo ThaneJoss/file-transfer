@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { formatBytes } from "../lib/files/format";
 import { useAuth } from "../lib/auth/AuthProvider";
 
 export type AppRouteId = "direct" | "stun" | "turn" | "sfu" | "r2";
@@ -29,11 +30,9 @@ export function AppShell({
   const location = useLocation();
   const { session, usage, signOut } = useAuth();
   const [accountError, setAccountError] = useState("");
-  const activeRoute = routes.find((route) => route.path === location.pathname)?.id ?? "direct";
-  const activeRouteIndex = Math.max(
-    0,
-    routes.findIndex((route) => route.id === activeRoute),
-  );
+  const activeRoute = routes.find((route) => route.path === location.pathname);
+  const activeRouteIndex = activeRoute ? routes.findIndex((route) => route.id === activeRoute.id) : 0;
+  const usageLabel = `TURN ${formatBytes(usage.services.turn.bytes)} · SFU ${formatBytes(usage.services.sfu.bytes)} · R2 ${formatBytes(usage.services.r2.bytes)}`;
 
   return (
     <main
@@ -64,12 +63,14 @@ export function AppShell({
           <div className="relative grid min-w-[520px] grid-cols-5 max-[700px]:min-w-0">
             <span
               aria-hidden="true"
-              className="absolute inset-y-0 left-0 z-0 w-1/5 rounded-xl bg-[#1677ff] shadow-[0_10px_26px_rgba(47,125,246,0.22)]"
+              className={`absolute inset-y-0 left-0 z-0 w-1/5 rounded-xl bg-[#1677ff] shadow-[0_10px_26px_rgba(47,125,246,0.22)] ${
+                activeRoute ? "opacity-100" : "opacity-0"
+              }`}
               data-testid="nav-active-indicator"
               style={{ transform: `translateX(${activeRouteIndex * 100}%)` }}
             />
             {routes.map((route) => {
-              const active = activeRoute === route.id;
+              const active = activeRoute?.id === route.id;
               return (
                 <NavLink
                   className={`relative z-10 flex min-h-12 w-full items-center justify-center whitespace-nowrap rounded-xl px-4 text-center transition-colors duration-200 max-[700px]:px-3 max-[700px]:py-2.5 ${
@@ -90,12 +91,12 @@ export function AppShell({
         <div className="flex min-w-0 justify-end" data-testid="account-area">
           {session ? (
             <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)]">
-              <div className="min-w-0">
+              <Link className="min-w-0 rounded-lg px-2 py-1 hover:bg-[#eaf2ff]" to="/account" aria-label="用户页面">
                 <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
-                <div className="whitespace-nowrap text-xs text-[#526c92]" aria-label="用量事件">
-                  TURN {usage.turn} · R2 {usage.r2} · SFU {usage.sfu}
+                <div className="whitespace-nowrap text-xs text-[#526c92]" aria-label="本月流量" title={usageLabel}>
+                  {usageLabel}
                 </div>
-              </div>
+              </Link>
               <button
                 className="rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
                 onClick={() => void signOut().catch((error) => setAccountError(error instanceof Error ? error.message : "退出登录失败。"))}

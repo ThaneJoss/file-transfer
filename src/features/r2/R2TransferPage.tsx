@@ -188,7 +188,7 @@ export function R2TransferPage() {
         setIsRequestingCredentials(true);
         setSenderError("");
         setSenderStatus(`正在为 ${file.name} 申请临时 R2 凭证...`);
-        const next = await requestR2Credentials(file.name);
+        const next = await requestR2Credentials(file.name, file.size);
         if (requestVersion !== credentialRequestRef.current) return;
         setCredentials(next);
         setObjectKey(next.objectKey);
