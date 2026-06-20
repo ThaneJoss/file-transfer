@@ -29,6 +29,7 @@ test.describe("STUN page", () => {
     await openRoute(page, "stun");
     await expect(page.getByText("STUN DataChannel")).toBeVisible();
     await expect(page.getByText(/stun.cloudflare.com:3478/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Probe$/ })).toHaveCount(0);
     await expectActiveNav(page, "stun");
     await expectSliderAligned(page);
     await expectNoHorizontalOverflow(page);
@@ -53,13 +54,16 @@ test.describe("STUN page", () => {
     await expect(page.getByText(/已收集 srflx|srflx 1/).first()).toBeVisible();
 
     await page.getByTestId("nav-item-direct").click();
-    await expect(page.evaluate(() => window.__appTest.rtc.closedPeers)).resolves.toBeGreaterThan(0);
+    await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 
   test("reports no usable STUN candidate when the browser only returns host candidates", async ({ page }) => {
     await installAppMocks(page, { candidateTypes: ["host"] });
     await openRoute(page, "stun");
-    await expect(page.getByText(/没有收集到 srflx|未得到 srflx|probe 失败/).first()).toBeVisible();
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "stun-host-only.txt");
+    await page.getByRole("button", { name: /生成 STUN Offer/ }).click();
+    await expect(page.getByRole("alert")).toContainText(/没有收集到 srflx|未得到 srflx|没有包含 ICE candidate/);
   });
 
   test("rejects invalid STUN offer input in receiver mode", async ({ page }) => {
@@ -113,6 +117,6 @@ test.describe("STUN page", () => {
 
     await expect(page.getByRole("alert")).toContainText("DataChannel 发生错误");
     await page.getByTestId("nav-item-direct").click();
-    await expect(page.evaluate(() => window.__appTest.rtc.closedPeers)).resolves.toBeGreaterThan(0);
+    await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 });

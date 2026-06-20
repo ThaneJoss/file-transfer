@@ -7,6 +7,7 @@ import {
   expectNoConsoleErrors,
   installAppMocks,
   openRoute,
+  rawSignalText,
   selectFile,
   withoutExpectedNetworkDiagnostics,
 } from "./support/app";
@@ -48,35 +49,50 @@ test.describe("TURN page", () => {
   test("opens directly with TURN transfer controls", async ({ page }) => {
     await openRoute(page, "turn");
     await expect(page.getByText("TURN Relay DataChannel")).toBeVisible();
-    await expect(page.getByText("临时 TURN 凭证")).toBeVisible();
+    await expect(page.getByText("临时 TURN 凭证")).toHaveCount(0);
+    await expect(page.getByLabel("TTL 秒")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Probe$/ })).toHaveCount(0);
     await expect(page.getByLabel("Key ID")).toHaveCount(0);
     await expect(page.getByLabel("API Token")).toHaveCount(0);
   });
 
-  test("validates TTL and generates mocked TURN iceServers", async ({ page }) => {
+  test("generates TURN credentials automatically when creating an offer", async ({ page }) => {
     await mockTurnSuccess(page);
     await openRoute(page, "turn");
-    await page.getByLabel("TTL 秒").fill("1");
-    await page.getByRole("button", { name: /^生成$/ }).click();
-    await expect(page.getByText(/60 到 86400 秒/)).toBeVisible();
-
-    await page.getByLabel("TTL 秒").fill("3600");
-    await page.getByRole("button", { name: /^生成$/ }).click();
-    await expect(page.getByText(/已生成 1 组 TURN iceServers/)).toBeVisible();
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "turn-auto-offer.txt");
+    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
+    await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
   });
 
   test("applies relay-only TURN config when generating an offer", async ({ page }) => {
     await mockTurnSuccess(page);
     await openRoute(page, "turn");
-    await page.getByRole("button", { name: /^生成$/ }).click();
-    await expect(page.getByText(/已生成 1 组 TURN iceServers/)).toBeVisible();
-
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-demo.txt");
     await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
     await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
     const offer = await decodeConnectionCodePayload(page, await page.getByLabel(/发送方 TURN Offer/).inputValue());
     expect(JSON.stringify(offer)).not.toMatch(/temporary-password|apiToken|TURN Token/i);
+    await expect(
+      page.evaluate(() => window.__appTest.rtc.createdConfigs.some((config) => config.iceTransportPolicy === "relay")),
+    ).resolves.toBe(true);
+  });
+
+  test("generates TURN credentials automatically when creating an answer", async ({ page }) => {
+    await mockTurnSuccess(page);
+    await openRoute(page, "turn");
+    await page.getByRole("button", { name: /接收文件/ }).click();
+    await page.getByLabel(/发送方 TURN Offer/).fill(
+      rawSignalText({
+        kind: "turn-webrtc-signal",
+        role: "offer",
+        descriptionType: "offer",
+        candidateTypes: ["relay"],
+      }),
+    );
+    await page.getByRole("button", { name: /生成 TURN Answer/ }).click();
+    await expect(page.getByText(/已连接|接收方 TURN Answer/)).toBeVisible();
     await expect(
       page.evaluate(() => window.__appTest.rtc.createdConfigs.some((config) => config.iceTransportPolicy === "relay")),
     ).resolves.toBe(true);
@@ -92,8 +108,10 @@ test.describe("TURN page", () => {
         });
       });
       await openRoute(page, "turn");
-      await page.getByRole("button", { name: /^生成$/ }).click();
-      await expect(page.getByText(`mock ${status}`)).toBeVisible();
+      await page.getByRole("button", { name: /发送文件/ }).click();
+      await selectFile(page, `turn-${status}.txt`);
+      await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
+      await expect(page.getByRole("alert")).toContainText(`mock ${status}`);
     });
   }
 
@@ -102,7 +120,9 @@ test.describe("TURN page", () => {
       route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Unauthorized" }) }),
     );
     await openRoute(page, "turn");
-    await page.getByRole("button", { name: /^生成$/ }).click();
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "turn-session.txt");
+    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("alert")).toContainText("登录已过期");
   });
@@ -110,7 +130,9 @@ test.describe("TURN page", () => {
   test("reports network interruption during TURN credential generation", async ({ page }) => {
     await page.route(`${apiBaseUrl}/v1/turn/credentials`, (route) => route.abort("failed"));
     await openRoute(page, "turn");
-    await page.getByRole("button", { name: /^生成$/ }).click();
-    await expect(page.getByText(/Failed to fetch|TURN iceServers 生成或 probe 失败/)).toBeVisible();
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "turn-network.txt");
+    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
+    await expect(page.getByRole("alert")).toContainText(/Failed to fetch|TURN iceServers 生成失败/);
   });
 });
