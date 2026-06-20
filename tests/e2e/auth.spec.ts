@@ -105,6 +105,40 @@ test.describe("authentication", () => {
     await expect(page.getByTestId("usage-card-turn")).toContainText(usageMbLabel(refreshedVersion));
   });
 
+  test("updates the signed-in user's name", async ({ page }) => {
+    await installAppMocks(page);
+    await page.unroute(`${apiBaseUrl}/api/auth/get-session`);
+    let currentName = "测试用户";
+    await page.route(`${apiBaseUrl}/api/auth/get-session`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...testAuthSession(),
+          user: { ...testAuthSession().user, name: currentName },
+        }),
+      }),
+    );
+    await page.route(`${apiBaseUrl}/api/auth/update-user`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(await route.request().postDataJSON()).toEqual({ name: "新用户名" });
+      currentName = "新用户名";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ status: true }),
+      });
+    });
+
+    await page.goto("/account");
+    await page.getByRole("button", { name: "修改用户名" }).click();
+    await page.getByLabel("新用户名").fill("  新用户名  ");
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+
+    await expect(page.getByRole("status")).toContainText("用户名已更新。");
+    await expect(page.getByTestId("user-usage-page")).toContainText("新用户名");
+    await expect(page.getByTestId("account-area")).toContainText("新用户名");
+    await expect(page.getByLabel("新用户名")).toHaveCount(0);
+  });
+
   test("registers with passkey registration context", async ({ page }) => {
     await installAppMocks(page);
     await installWebAuthnMocks(page);

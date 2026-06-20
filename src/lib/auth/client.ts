@@ -30,6 +30,7 @@ type PasskeyAuthClient = {
     refetch: () => Promise<void>;
   };
   signOut: () => AuthResult<unknown>;
+  updateUser: (options: { name?: string; image?: string | null }) => AuthResult<{ status: boolean }>;
   signIn: {
     passkey: () => AuthResult<AuthSession>;
   };

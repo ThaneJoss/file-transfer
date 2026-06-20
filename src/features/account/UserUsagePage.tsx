@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
 import { Panel } from "../../component/Panel";
-import { SecondaryButton, StatusMessage } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextInput } from "../../component/TransferControls";
+import { authClient } from "../../lib/auth/client";
 import { useAuth } from "../../lib/auth/AuthProvider";
 import type { UsagePeriod, UsageService } from "../../lib/auth/AuthProvider";
 import { formatBytes, formatPercent } from "../../lib/files/format";
@@ -17,14 +19,19 @@ const serviceRows: Array<{
 ];
 
 export function UserUsagePage() {
-  const { session, usage, refreshUsage } = useAuth();
+  const { session, usage, refreshSession, refreshUsage } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [name, setName] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const accountName = session?.user.name || session?.user.email || "当前用户";
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setError("");
+    setNotice("");
     try {
       await refreshUsage();
     } catch (cause) {
@@ -38,6 +45,37 @@ export function UserUsagePage() {
     void refresh();
   }, [refresh]);
 
+  async function saveName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = name.trim();
+    if (!nextName) {
+      setError("用户名不能为空。");
+      return;
+    }
+
+    setSavingName(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await authClient.updateUser({ name: nextName });
+      if (result.error) throw new Error(result.error.message || "修改用户名失败。");
+      await refreshSession();
+      setEditingName(false);
+      setNotice("用户名已更新。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "修改用户名失败。");
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  function startEditingName() {
+    setName(session?.user.name || "");
+    setError("");
+    setNotice("");
+    setEditingName(true);
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-[1100px] gap-4 py-2" data-testid="user-usage-page">
       <Panel className="p-6">
@@ -48,10 +86,38 @@ export function UserUsagePage() {
               {accountName} · {formatPeriod(usage.period)}
             </p>
           </div>
-          <SecondaryButton onClick={() => void refresh()} disabled={refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
-          </SecondaryButton>
+          <div className="flex flex-wrap justify-end gap-2">
+            <SecondaryButton onClick={startEditingName} disabled={editingName || savingName}>
+              修改用户名
+            </SecondaryButton>
+            <SecondaryButton onClick={() => void refresh()} disabled={refreshing || savingName}>
+              {refreshing ? "刷新中..." : "刷新"}
+            </SecondaryButton>
+          </div>
         </div>
+
+        {editingName && (
+          <form className="mt-5 grid gap-3 border-t border-[#dceafa] pt-5" onSubmit={(event) => void saveName(event)}>
+            <TextInput label="新用户名" value={name} onChange={setName} placeholder="输入新的用户名" />
+            <div className="flex flex-wrap justify-end gap-2">
+              <SecondaryButton
+                onClick={() => {
+                  setEditingName(false);
+                  setError("");
+                }}
+                disabled={savingName}
+              >
+                取消
+              </SecondaryButton>
+              <PrimaryButton
+                type="submit"
+                disabled={savingName || !name.trim() || name.trim() === session?.user.name}
+              >
+                {savingName ? "保存中..." : "保存"}
+              </PrimaryButton>
+            </div>
+          </form>
+        )}
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <UsageMetric label="本月总流量" value={formatBytes(usage.totalBytes)} />
@@ -59,6 +125,7 @@ export function UserUsagePage() {
         </div>
 
         {error && <div className="mt-4"><StatusMessage message={error} tone="error" /></div>}
+        {notice && <div className="mt-4"><StatusMessage message={notice} tone="info" /></div>}
       </Panel>
 
       <div className="grid gap-4 md:grid-cols-3">
