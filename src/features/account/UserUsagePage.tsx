@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Panel } from "../../component/Panel";
 import { SecondaryButton, StatusMessage } from "../../component/TransferControls";
@@ -22,7 +22,7 @@ export function UserUsagePage() {
   const [error, setError] = useState("");
   const accountName = session?.user.name || session?.user.email || "当前用户";
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
     setError("");
     try {
@@ -32,7 +32,11 @@ export function UserUsagePage() {
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [refreshUsage]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   return (
     <div className="mx-auto grid w-full max-w-[1100px] gap-4 py-2" data-testid="user-usage-page">

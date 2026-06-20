@@ -37,6 +37,7 @@ import {
   UploadPanel,
 } from "../../layout/TransferLayout";
 import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
+import { notifyApiUsageChanged } from "../../lib/api/client";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
 import { formatBytes, formatPercent } from "../../lib/files/format";
@@ -798,7 +799,8 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     setStatus("正在申请临时 TURN relay 配置...");
     setIsGeneratingTurnCredentials(true);
     try {
-      const iceServers = await generateCloudflareTurnIceServers(defaultTurnCredentialTtlSeconds);
+      const fileSizeBytes = role === "sender" ? selectedFile?.size : undefined;
+      const iceServers = await generateCloudflareTurnIceServers(defaultTurnCredentialTtlSeconds, fileSizeBytes);
       const nextRtcConfig: RTCConfiguration = { iceServers, iceTransportPolicy: "relay" };
       setTurnIceServers(iceServers);
       setStatus("临时 TURN relay 配置已准备，正在生成信令...");
@@ -1233,6 +1235,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setSentBytes(file.size);
       setSenderProgress(100);
       setSenderStatus("文件已发送完成。");
+      if (variant === "turn") notifyApiUsageChanged();
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "发送文件失败。");
     } finally {
@@ -1286,6 +1289,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
         setReceivedBytes(blob.size);
         setReceiverStatus("文件接收完成，已触发浏览器下载。");
         saveBlob(receivedFile);
+        if (variant === "turn") notifyApiUsageChanged();
         receiveChunksRef.current = [];
         receiveMetaRef.current = null;
         setIncomingMeta(null);

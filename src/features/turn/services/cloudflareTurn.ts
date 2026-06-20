@@ -30,8 +30,11 @@ export function normalizeIceServers(value: unknown): RTCIceServer[] {
   });
 }
 
-export async function generateCloudflareTurnIceServers(ttlSeconds: number) {
-  const data = await apiJson<CloudflareTurnResponse>("/v1/turn/credentials", "POST", { ttlSeconds });
+export async function generateCloudflareTurnIceServers(ttlSeconds: number, fileSizeBytes: number | undefined) {
+  const data = await apiJson<CloudflareTurnResponse>("/v1/turn/credentials", "POST", {
+    ttlSeconds,
+    ...(fileSizeBytes === undefined ? {} : { fileSizeBytes }),
+  });
   const iceServers = normalizeIceServers(data.iceServers);
   if (iceServers.length === 0) {
     throw new Error("Cloudflare 响应里没有可用的 iceServers。");

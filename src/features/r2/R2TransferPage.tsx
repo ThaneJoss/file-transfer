@@ -43,6 +43,7 @@ import {
 import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
+import { notifyApiUsageChanged } from "../../lib/api/client";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 
 type R2ConnectionCode = {
@@ -277,6 +278,7 @@ export function R2TransferPage() {
       setSenderProgress(100);
       setConnectionCode(code);
       setSenderStatus(`文件已上传到 R2。预签名下载链接有效期 ${expiresIn} 秒，复制连接码给接收方。`);
+      notifyApiUsageChanged();
     } catch (error) {
       setSenderError(formatFetchError(error));
       setSenderProgress(0);
@@ -346,6 +348,7 @@ export function R2TransferPage() {
       setReceiverProgress(100);
       setReceiverStatus("文件已从 R2 下载完成，已触发浏览器下载。");
       saveBlob(receivedFile);
+      notifyApiUsageChanged();
     } catch (error) {
       setReceiverError(formatFetchError(error));
       setReceiverProgress(0);

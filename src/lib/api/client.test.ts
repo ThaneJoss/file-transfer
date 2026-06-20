@@ -2,7 +2,7 @@ import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 
 import { server } from "../../test/mocks/server";
-import { API_UNAUTHORIZED_EVENT, ApiError, apiJson, apiRequest } from "./client";
+import { API_UNAUTHORIZED_EVENT, API_USAGE_CHANGED_EVENT, ApiError, apiJson, apiRequest } from "./client";
 
 describe("API client", () => {
   it("adds the API base URL, session cookie mode, and JSON content type", async () => {
@@ -26,5 +26,16 @@ describe("API client", () => {
     await expect(apiRequest("/v1/private")).rejects.toMatchObject({ status: 401, message: "Unauthorized" } satisfies Partial<ApiError>);
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(API_UNAUTHORIZED_EVENT, listener);
+  });
+
+  it("emits a usage changed event for metered API calls", async () => {
+    const listener = vi.fn();
+    window.addEventListener(API_USAGE_CHANGED_EVENT, listener);
+    server.use(
+      http.post("https://api.file.thanejoss.com/v1/turn/credentials", () => HttpResponse.json({ iceServers: [] })),
+    );
+    await apiJson("/v1/turn/credentials", "POST", { ttlSeconds: 3600 });
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener(API_USAGE_CHANGED_EVENT, listener);
   });
 });

@@ -71,12 +71,15 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       throw new ApiError(value.error, response.status, body);
     }
   }
-  if (typeof window !== "undefined" && /^\/v1\/(turn\/credentials|r2\/credentials|sfu\/)/.test(path)) {
-    window.dispatchEvent(new Event(API_USAGE_CHANGED_EVENT));
-  }
+  if (/^\/v1\/(turn\/credentials|r2\/credentials|sfu\/)/.test(path)) notifyApiUsageChanged();
   return body as T;
 }
 
 export function apiJson<T>(path: string, method: "POST" | "PUT", body: unknown) {
   return apiRequest<T>(path, { method, body: JSON.stringify(body) });
+}
+
+export function notifyApiUsageChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(API_USAGE_CHANGED_EVENT));
 }
