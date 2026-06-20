@@ -4,11 +4,11 @@ export const routeIds = ["direct", "stun", "turn", "sfu", "r2"] as const;
 export type RouteId = (typeof routeIds)[number];
 
 export const routePath: Record<RouteId, string> = {
-  direct: "/direct",
-  stun: "/stun",
-  turn: "/turn",
-  sfu: "/sfu",
-  r2: "/r2",
+  direct: "/",
+  stun: "/",
+  turn: "/",
+  sfu: "/",
+  r2: "/",
 };
 
 export const apiBaseUrl = "https://api.file.thanejoss.com";
@@ -236,7 +236,7 @@ export async function installAppMocks(
       body: JSON.stringify({ code: "12345678", expiresAt: Date.now() + 3600_000 }),
     });
   });
-  await page.route(`${apiBaseUrl}/v1/pickups/*`, async (route) => {
+  await page.route(`${apiBaseUrl}/v1/pickups/**`, async (route) => {
     const request = route.request();
     const isAnswer = new URL(request.url()).pathname.endsWith("/answer");
     if (isAnswer && request.method() === "GET") {
@@ -247,7 +247,11 @@ export async function installAppMocks(
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: true }) });
       return;
     }
-    const variant = page.url().includes("/stun") ? "stun" : "direct";
+    const variant = await page.evaluate(() =>
+      document.querySelector('[data-testid="method-option-stun"]')?.getAttribute("aria-pressed") === "true"
+        ? "stun"
+        : "direct",
+    );
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -504,17 +508,20 @@ export async function installAppMocks(
 }
 
 export async function openRoute(page: Page, route: RouteId) {
-  await page.goto(routePath[route]);
+  await page.goto("/");
   await page.addStyleTag({
     content: "*,*::before,*::after{transition-duration:0s!important;animation-duration:0s!important;scroll-behavior:auto!important}",
   });
   await expect(page.getByTestId("app-shell")).toBeVisible();
+  if (route !== "direct") {
+    await page.getByTestId(`method-option-${route}`).click();
+  }
   await expectActiveNav(page, route);
 }
 
 export async function expectActiveNav(page: Page, route: RouteId) {
-  const item = page.getByTestId(`nav-item-${route}`);
-  await expect(item).toHaveAttribute("aria-current", "page");
+  const item = page.getByTestId(`method-option-${route}`);
+  await expect(item).toHaveAttribute("aria-pressed", "true");
   await expect(item).toBeVisible();
 }
 
@@ -544,16 +551,10 @@ export async function getLayoutMetrics(page: Page) {
       };
     }
 
-    const activeNav = document.querySelector("nav a[aria-current='page']");
-    if (!activeNav) throw new Error("Missing active nav item");
-    const activeNavRect = activeNav.getBoundingClientRect();
-
     return {
       shell: rectFor("[data-testid='app-shell']", "main"),
       brand: rectFor("[data-testid='app-brand']"),
       header: rectFor("[data-testid='app-header']", "header"),
-      nav: rectFor("[data-testid='app-nav']", "nav[aria-label]"),
-      slider: rectFor("[data-testid='nav-active-indicator']", "nav span[aria-hidden='true']"),
       pageSlot: rectFor("[data-testid='page-slot']", "main > :nth-child(2)"),
       workspace: rectFor("[data-testid='transfer-page-root']"),
       statusPanel: rectFor("[data-testid='status-panel']"),
@@ -562,16 +563,6 @@ export async function getLayoutMetrics(page: Page) {
       uploadPanel: rectFor("[data-testid='upload-panel']"),
       fileListPanel: rectFor("[data-testid='file-list-panel']"),
       uploadDropzone: rectFor("[data-testid='file-upload-dropzone']"),
-      activeNav: {
-        x: activeNavRect.x,
-        y: activeNavRect.y,
-        width: activeNavRect.width,
-        height: activeNavRect.height,
-        top: activeNavRect.top,
-        left: activeNavRect.left,
-        right: activeNavRect.right,
-        bottom: activeNavRect.bottom,
-      },
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
       hasVerticalScrollbar: document.documentElement.scrollHeight > document.documentElement.clientHeight,
@@ -586,7 +577,6 @@ export function expectRectStable(
     | "shell"
     | "brand"
     | "header"
-    | "nav"
     | "pageSlot"
     | "workspace"
     | "statusPanel"
@@ -612,11 +602,7 @@ export async function expectNoHorizontalOverflow(page: Page) {
 }
 
 export async function expectSliderAligned(page: Page) {
-  const metrics = await getLayoutMetrics(page);
-  expect(Math.abs(metrics.slider.x - metrics.activeNav.x), "slider.x").toBeLessThanOrEqual(2);
-  expect(Math.abs(metrics.slider.y - metrics.activeNav.y), "slider.y").toBeLessThanOrEqual(2);
-  expect(Math.abs(metrics.slider.width - metrics.activeNav.width), "slider.width").toBeLessThanOrEqual(2);
-  expect(Math.abs(metrics.slider.height - metrics.activeNav.height), "slider.height").toBeLessThanOrEqual(2);
+  await expect(page.getByTestId("transfer-method-selector")).toBeVisible();
 }
 
 export async function waitForLayoutStable(page: Page) {
@@ -656,7 +642,6 @@ export async function waitForLayoutStable(page: Page) {
       }),
     [
       "[data-testid='app-header']",
-      "[data-testid='app-nav']",
       "[data-testid='transfer-page-root']",
       "[data-testid='status-panel']",
       "[data-testid='target-panel']",
@@ -668,7 +653,6 @@ export async function waitForLayoutStable(page: Page) {
 
 export async function expectSharedPanelsVisible(page: Page) {
   await expect(page.getByTestId("app-brand")).toBeVisible();
-  await expect(page.getByTestId("app-nav")).toBeVisible();
   await expect(page.getByTestId("transfer-page-root")).toBeVisible();
   await expect(page.getByTestId("status-panel")).toBeVisible();
   await expect(page.getByTestId("target-panel")).toBeVisible();

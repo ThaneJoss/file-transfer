@@ -18,7 +18,7 @@ export function AuthPage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const from = (location.state as { from?: string } | null)?.from ?? "/turn";
+  const from = (location.state as { from?: string } | null)?.from ?? "/";
   const passkeySupported = supportsPasskeys();
 
   if (!isPending && session) return <Navigate to={from} replace />;

@@ -75,10 +75,9 @@ test.describe("SFU page", () => {
     await expect(page.getByLabel(/发送方 SFU 连接码/)).not.toHaveValue("");
     const code = await decodeConnectionCodePayload(page, await page.getByLabel(/发送方 SFU 连接码/).inputValue());
     expect(JSON.stringify(code)).not.toMatch(/appToken|SFU Token|authorization/i);
-    await expect(page.getByText(/SFU 发布通道已就绪/)).toBeVisible();
+    await expect(page.getByText(/取件码 12345678 已生成/)).toBeVisible();
 
-    await page.getByTestId("nav-item-direct").click();
-    await expect(page).toHaveURL(routePath.direct);
+    await page.getByRole("button", { name: /重置/ }).click();
     await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 
@@ -116,14 +115,10 @@ test.describe("SFU page", () => {
     await expect(page.getByText("文件已发送完成。")).toBeVisible();
   });
 
-  test("creates a mocked subscriber and rejects malformed connection codes", async ({ page }) => {
+  test("creates a mocked subscriber from a pickup code", async ({ page }) => {
     await mockSfuSuccess(page);
     await openRoute(page, "sfu");
     await page.getByRole("button", { name: /接收文件/ }).click();
-    await page.getByLabel("发送方 SFU 连接码").fill("not-json");
-    await page.getByRole("button", { name: /读取连接码/ }).click();
-    await expect(page.getByRole("alert")).toContainText(/Unexpected token|SFU 连接码格式不正确/);
-
     const code = {
       kind: sfuFileProtocolKind,
       publisherSessionId: "publisher-session",
@@ -139,8 +134,20 @@ test.describe("SFU page", () => {
       },
       createdAt: Date.now(),
     };
-    await page.getByLabel("发送方 SFU 连接码").fill(JSON.stringify(code));
-    await page.getByRole("button", { name: /读取连接码/ }).click();
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "sfu",
+          offer: JSON.stringify(code),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("87654321");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
     await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
     await expect(page.getByText(/已订阅 SFU DataChannel/)).toBeVisible();
   });
@@ -161,14 +168,26 @@ test.describe("SFU page", () => {
       chunkSize: 16,
       totalChunks: 1,
     };
-    await page.getByLabel("发送方 SFU 连接码").fill(JSON.stringify({
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "sfu",
+          offer: JSON.stringify({
       kind: sfuFileProtocolKind,
       publisherSessionId: "publisher-session",
       dataChannelName: "file-test",
       file,
       createdAt: Date.now(),
-    }));
-    await page.getByRole("button", { name: /读取连接码/ }).click();
+          }),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("87654321");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
     await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
     await expect(page.getByText(/已订阅 SFU DataChannel/)).toBeVisible();
 
@@ -214,7 +233,7 @@ test.describe("SFU page", () => {
     await page.getByRole("button", { name: /创建发布通道/ }).click();
     await expect(page.getByText(/没有返回 sessionId/)).toBeVisible();
 
-    await page.getByTestId("nav-item-direct").click();
+    await page.getByRole("button", { name: /重置/ }).click();
     await expect(page.evaluate(() => window.__appTest.rtc.closedPeers)).resolves.toBeGreaterThanOrEqual(0);
   });
 

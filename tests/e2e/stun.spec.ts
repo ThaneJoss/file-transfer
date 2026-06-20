@@ -10,7 +10,6 @@ import {
   installAppMocks,
   openRoute,
   rawSignalText,
-  routePath,
   selectFile,
 } from "./support/app";
 
@@ -25,7 +24,7 @@ test.describe("STUN page", () => {
     await expectNoConsoleErrors(consoleErrors);
   });
 
-  test("opens directly, refreshes in place, marks nav active, and supports history", async ({ page }) => {
+  test("opens through the home method selector and falls back to Direct on refresh", async ({ page }) => {
     await installAppMocks(page);
     await openRoute(page, "stun");
     await expect(page.getByText("STUN DataChannel", { exact: true })).toBeVisible();
@@ -36,13 +35,7 @@ test.describe("STUN page", () => {
     await expectNoHorizontalOverflow(page);
 
     await page.reload();
-    await expect(page).toHaveURL(routePath.stun);
-    await expectActiveNav(page, "stun");
-
-    await page.getByTestId("nav-item-direct").click();
-    await expect(page).toHaveURL(routePath.direct);
-    await page.goBack();
-    await expect(page).toHaveURL(routePath.stun);
+    await expectActiveNav(page, "direct");
   });
 
   test("uses STUN candidates for sender offer generation and cleans resources on unmount", async ({ page }) => {
@@ -51,21 +44,21 @@ test.describe("STUN page", () => {
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "stun-demo.txt");
     await expect(page.getByTestId("sender-pickup-code")).toHaveText("12345678");
-    await expect(page.getByText(/已收集 srflx|srflx 1/).first()).toBeVisible();
 
-    await page.getByTestId("nav-item-direct").click();
+    await page.getByRole("button", { name: /重置/ }).click();
     await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 
-  test("reports no usable STUN candidate when the browser only returns host candidates", async ({ page }) => {
+  test("allows STUN host-candidate fallback when srflx is unavailable", async ({ page }) => {
     await installAppMocks(page, { candidateTypes: ["host"] });
     await openRoute(page, "stun");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "stun-host-only.txt");
-    await expect(page.getByRole("alert")).toContainText(/没有收集到 srflx|未得到 srflx|没有包含 ICE candidate/);
+    await expect(page.getByTestId("sender-pickup-code")).toHaveText("12345678");
+    await expect(page.getByRole("alert")).toHaveCount(0);
   });
 
-  test("rejects a Direct pickup code on the STUN page", async ({ page }) => {
+  test("auto switches to the pickup code's method", async ({ page }) => {
     await installAppMocks(page);
     await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
       route.fulfill({
@@ -88,10 +81,10 @@ test.describe("STUN page", () => {
     await page.getByRole("button", { name: /接收文件/ }).click();
     await page.getByLabel("8 位取件码").fill("87654321");
     await page.getByRole("button", { name: "取件并连接" }).click();
-    await expect(page.getByRole("alert")).toContainText("该取件码属于 DIRECT");
+    await expect(page.getByRole("heading", { name: "已连接" })).toBeVisible();
   });
 
-  test("rejects host-only STUN answers before applying them to the sender", async ({ page }) => {
+  test("accepts host-only STUN answers as a fallback", async ({ page }) => {
     await installAppMocks(page);
     await page.route(`${apiBaseUrl}/v1/pickups/12345678/answer`, (route) =>
       route.fulfill({
@@ -109,7 +102,9 @@ test.describe("STUN page", () => {
     await openRoute(page, "stun");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "stun-host-only.txt");
-    await expect(page.getByRole("alert")).toContainText(/没有可用于连接的 srflx\/relay 候选|建立 STUN 连接失败/);
+    await page.waitForFunction(() =>
+      window.__appTest.rtc.sentPayloads.some((payload) => payload.kind === "text" && payload.value.includes('"kind":"done"')),
+    );
   });
 
   test("reports STUN DataChannel errors during connection establishment", async ({ page }) => {
@@ -131,7 +126,7 @@ test.describe("STUN page", () => {
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "stun-channel-error.txt");
     await expect(page.getByRole("alert")).toContainText("DataChannel 发生错误");
-    await page.getByTestId("nav-item-direct").click();
+    await page.getByRole("button", { name: /重置/ }).click();
     await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 });

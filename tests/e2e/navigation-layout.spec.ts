@@ -34,7 +34,6 @@ const stableGeometryViewports = [
 const stableLayoutKeys = [
   "brand",
   "header",
-  "nav",
   "pageSlot",
   "workspace",
   "statusPanel",
@@ -90,15 +89,14 @@ for (const viewport of stableGeometryViewports) {
       await expectNoConsoleErrors(consoleErrors);
     });
 
-    test("keeps shared shell and workspace geometry stable through a full route cycle", async ({ page }) => {
+    test("keeps shared shell and workspace geometry stable through a full method cycle", async ({ page }) => {
       const sequence: RouteId[] = ["stun", "turn", "sfu", "r2", "direct"];
       await openRoute(page, "direct");
       await waitForLayoutStable(page);
       const baseline = await getLayoutMetrics(page);
 
       for (const route of sequence) {
-        await page.getByTestId(`nav-item-${route}`).click();
-        await expect(page).toHaveURL(routePath[route]);
+        await page.getByTestId(`method-option-${route}`).click();
         await expectActiveNav(page, route);
         await waitForLayoutStable(page);
         expectRectStable(baseline, await getLayoutMetrics(page), [...stableLayoutKeys]);
@@ -107,47 +105,22 @@ for (const viewport of stableGeometryViewports) {
       }
     });
 
-    test("supports browser back and forward without moving shared layout", async ({ page }) => {
-      await openRoute(page, "direct");
-      await waitForLayoutStable(page);
-      const before = await getLayoutMetrics(page);
-      await page.getByTestId("nav-item-stun").click();
-      await waitForLayoutStable(page);
-      await page.getByTestId("nav-item-turn").click();
-      await waitForLayoutStable(page);
-
-      await page.goBack();
-      await expect(page).toHaveURL(routePath.stun);
-      await waitForLayoutStable(page);
-      expectRectStable(before, await getLayoutMetrics(page), [...stableLayoutKeys]);
-
-      await page.goBack();
-      await expect(page).toHaveURL(routePath.direct);
-      await waitForLayoutStable(page);
-      expectRectStable(before, await getLayoutMetrics(page), [...stableLayoutKeys]);
-
-      await page.goForward();
-      await expect(page).toHaveURL(routePath.stun);
-      await waitForLayoutStable(page);
-      await expectSliderAligned(page);
-    });
-
-    test("handles rapid route clicks and repeated current-route clicks", async ({ page }) => {
+    test("handles rapid method clicks and repeated current-method clicks", async ({ page }) => {
       await openRoute(page, "direct");
       await waitForLayoutStable(page);
       const before = await getLayoutMetrics(page);
 
       for (const id of ["stun", "turn", "sfu", "r2"] as const) {
-        await page.getByTestId(`nav-item-${id}`).click();
+        await page.getByTestId(`method-option-${id}`).click();
       }
-      await expect(page).toHaveURL(routePath.r2);
+      await expectActiveNav(page, "r2");
       await waitForLayoutStable(page);
       expectRectStable(before, await getLayoutMetrics(page), [...stableLayoutKeys]);
       await expectSliderAligned(page);
 
       const repeatBefore = await getLayoutMetrics(page);
-      await page.getByTestId("nav-item-r2").click();
-      await expect(page).toHaveURL(routePath.r2);
+      await page.getByTestId("method-option-r2").click();
+      await expectActiveNav(page, "r2");
       await waitForLayoutStable(page);
       expectRectStable(repeatBefore, await getLayoutMetrics(page), [...stableLayoutKeys]);
     });
@@ -166,8 +139,8 @@ for (const viewport of stableGeometryViewports) {
       const withScrollbar = await getLayoutMetrics(page);
       expectRectStable(before, withScrollbar, [...stableLayoutKeys]);
 
-      await page.getByTestId("nav-item-r2").click();
-      await expect(page).toHaveURL(routePath.r2);
+      await page.getByTestId("method-option-r2").click();
+      await expectActiveNav(page, "r2");
       await waitForLayoutStable(page);
       expectRectStable(withScrollbar, await getLayoutMetrics(page), [...stableLayoutKeys]);
 

@@ -1,6 +1,18 @@
 import { apiJson, apiRequest, notifyApiUsageChanged } from "../../../lib/api/client";
 
-export type PickupVariant = "direct" | "stun";
+export type PickupVariant = "direct" | "stun" | "turn" | "sfu" | "r2";
+export type WebRtcPickupVariant = Extract<PickupVariant, "direct" | "stun" | "turn">;
+export type PickupPayload = {
+  status: "found";
+  variant: PickupVariant;
+  offer: string;
+  expiresAt: number;
+  answered: boolean;
+};
+export type PendingPickup = {
+  code: string;
+  pickup: PickupPayload;
+};
 
 export async function createPickup(variant: PickupVariant, offer: string) {
   const result = await apiJson<{ code: string; expiresAt: number }>("/v1/pickups", "POST", {
@@ -12,13 +24,7 @@ export async function createPickup(variant: PickupVariant, offer: string) {
 }
 
 export async function getPickup(code: string) {
-  const result = await apiRequest<{
-    status: "found";
-    variant: PickupVariant;
-    offer: string;
-    expiresAt: number;
-    answered: boolean;
-  }>(`/v1/pickups/${encodeURIComponent(code)}`, { cache: "no-store" });
+  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, { cache: "no-store" });
   notifyApiUsageChanged();
   return result;
 }
@@ -41,7 +47,7 @@ export function getPickupAnswer(code: string) {
 }
 
 export async function recordTransferUsage(
-  service: PickupVariant,
+  service: WebRtcPickupVariant,
   bytes: number,
   transferId: string,
 ) {

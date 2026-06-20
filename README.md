@@ -1,7 +1,7 @@
 # 文件中转站
 
-浏览器文件传输工具，包含 Direct、STUN、TURN、SFU 和 R2 五种页面。Direct/STUN
-公开使用；登录后可使用 8 位取件码自动交换信令。TURN/SFU/R2 通过 Better Auth
+浏览器文件传输工具，首页提供 Direct、STUN、TURN、SFU 和 R2 五种传输方法。Direct/STUN
+公开使用；登录后五种方法都可使用 8 位取件码自动交换或读取信令。TURN/SFU/R2 通过 Better Auth
 session 访问后端控制面。
 
 ## Scripts
@@ -34,8 +34,8 @@ pnpm exec playwright install chromium --only-shell
 ## Testing
 
 - Vitest 覆盖 TURN/SFU API service、R2 SigV4 签名和通用协议边界。
-- Playwright 覆盖 `/direct`、`/stun`、`/turn`、`/sfu`、`/r2` 五个页面的直接访问、刷新、前进后退、基础表单、成功路径、主要错误路径和资源清理。
-- `tests/e2e/navigation-layout.spec.ts` 覆盖 1440x900、1280x800、390x844 三种视口，包含 20 个有向页面切换组合、快速切换、重复点击、前进后退和滚动条状态。
+- Playwright 覆盖首页五种传输方法的刷新、基础表单、成功路径、主要错误路径和资源清理。
+- `tests/e2e/navigation-layout.spec.ts` 覆盖 1440x900、1280x800、390x844 三种视口，包含方法切换、快速切换、重复点击和滚动条状态。
 
 可选真实集成测试与默认测试分离：
 
@@ -68,7 +68,7 @@ APP_ORIGIN=http://localhost:5173
 
 ## TURN
 
-`/turn` 页面在生成 TURN Offer 或 TURN Answer 时，会通过后端自动申请临时 `iceServers`：
+首页选择 TURN 方法后，生成 TURN Offer 或 TURN Answer 时会通过后端自动申请临时 `iceServers`：
 
 ```text
 POST /v1/turn/credentials
@@ -76,14 +76,14 @@ POST /v1/turn/credentials
 
 拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件，临时 TURN 凭证不会写入连接码。
 
-## Direct/STUN 取件码
+## 取件码
 
 登录用户选择文件后，前端生成 Offer，并调用 `POST /v1/pickups` 创建唯一的 8 位
 取件码。接收方输入取件码读取 Offer、生成 Answer 并写回，发送方轮询 Answer 后
 自动建立 DataChannel。Durable Object 只保存一小时内的信令；文件始终点对点传输。
 
 未登录用户不会看到取件码输入或生成入口，仍可使用原有手动 Offer/Answer 流程。
-Direct/STUN 发送完成后，发送端通过 `/v1/usage/transfers` 幂等上报实际文件字节。
+Direct/STUN 发送完成后，发送端通过 `/v1/usage/transfers` 幂等上报实际文件字节。TURN/SFU/R2 的取件码保存对应的临时信令或下载信息，文件内容仍不写入 Durable Object。
 
 ## Security
 

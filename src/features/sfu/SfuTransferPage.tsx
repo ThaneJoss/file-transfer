@@ -16,9 +16,9 @@ import {
   Wifi,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, ReactNode } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
 import {
   CallsSession,
   createCallsSession,
@@ -66,8 +66,11 @@ import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
 import { notifyApiUsageChanged } from "../../lib/api/client";
+import { useAuth } from "../../lib/auth/AuthProvider";
 import { createStableId } from "../../lib/browser/stableId";
 import { formatBytes, formatPercent } from "../../lib/files/format";
+import { createPickup, getPickup } from "../transfer/services/pickupApi";
+import type { PendingPickup } from "../transfer/services/pickupApi";
 
 type SfuConnectionCode = {
   kind: typeof sfuFileProtocolKind;
@@ -145,7 +148,16 @@ function createPeerConnection(onState: (peer: RTCPeerConnection) => void) {
   return peer;
 }
 
-export function SfuTransferPage() {
+export function SfuTransferPage({
+  methodSelector,
+  pendingPickup,
+  onPickupVariantResolved,
+}: {
+  methodSelector?: ReactNode;
+  pendingPickup?: PendingPickup | null;
+  onPickupVariantResolved?: (pending: PendingPickup) => void;
+}) {
+  const { session } = useAuth();
   const senderSessionRef = useRef<CallsSession | null>(null);
   const receiverSessionRef = useRef<CallsSession | null>(null);
   const senderChannelRef = useRef<RTCDataChannel | null>(null);
@@ -158,11 +170,15 @@ export function SfuTransferPage() {
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const sendInFlightRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const consumedPendingPickupRef = useRef("");
 
   const [mode, setMode] = useState<Mode>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [connectionCode, setConnectionCode] = useState("");
+  const [senderPickupCode, setSenderPickupCode] = useState("");
+  const [pickupExpiresAt, setPickupExpiresAt] = useState<number | null>(null);
   const [receiverCodeInput, setReceiverCodeInput] = useState("");
+  const [receiverPickupInput, setReceiverPickupInput] = useState("");
   const [parsedReceiverCode, setParsedReceiverCode] = useState<SfuConnectionCode | null>(null);
   const [receiveTargetLabel, setReceiveTargetLabel] = useState("");
   const [senderTransfer, setSenderTransfer] = useState<SfuTransferFile | null>(null);
@@ -186,9 +202,11 @@ export function SfuTransferPage() {
   const [receiverProgress, setReceiverProgress] = useState(0);
   const [isCreatingPublisher, setIsCreatingPublisher] = useState(false);
   const [isCreatingSubscriber, setIsCreatingSubscriber] = useState(false);
+  const [isPickupBusy, setIsPickupBusy] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
+  const pickupEnabled = Boolean(session?.user);
 
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
@@ -257,7 +275,10 @@ export function SfuTransferPage() {
     setMode(null);
     setSelectedFile(null);
     setConnectionCode("");
+    setSenderPickupCode("");
+    setPickupExpiresAt(null);
     setReceiverCodeInput("");
+    setReceiverPickupInput("");
     setParsedReceiverCode(null);
     setSenderTransfer(null);
     setSenderStatus("选择文件后通过后端创建 SFU 发布通道。");
@@ -271,6 +292,7 @@ export function SfuTransferPage() {
     setReceivedBytes(0);
     setSenderProgress(0);
     setReceiverProgress(0);
+    setIsPickupBusy(false);
     sendInFlightRef.current = false;
     setIsSending(false);
   }
@@ -279,6 +301,8 @@ export function SfuTransferPage() {
     closeSenderSession();
     setSelectedFile(file);
     setConnectionCode("");
+    setSenderPickupCode("");
+    setPickupExpiresAt(null);
     setSenderTransfer(null);
     setSentBytes(0);
     setSenderProgress(0);
@@ -297,6 +321,7 @@ export function SfuTransferPage() {
   function handleReceiverCodeInput(value: string) {
     closeReceiverSession();
     setReceiverCodeInput(value);
+    setReceiverPickupInput("");
     setParsedReceiverCode(null);
     setIncomingMeta(null);
     setReceivedBytes(0);
@@ -392,7 +417,20 @@ export function SfuTransferPage() {
         createdAt: Date.now(),
       });
       setConnectionCode(code);
-      setSenderStatus("SFU 发布通道已就绪。复制连接码给接收方，接收方订阅成功后点击发送文件。");
+      if (pickupEnabled) {
+        setSenderStatus("SFU 发布通道已就绪，正在写入取件码...");
+        try {
+          const pickup = await createPickup("sfu", code);
+          setSenderPickupCode(pickup.code);
+          setPickupExpiresAt(pickup.expiresAt);
+          setSenderStatus(`取件码 ${pickup.code} 已生成。接收方输入取件码订阅成功后，再点击发送文件。`);
+        } catch (error) {
+          setSenderError(`SFU 发布通道已就绪，但取件码生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+          setSenderStatus("可先复制连接码给接收方。");
+        }
+      } else {
+        setSenderStatus("SFU 发布通道已就绪。复制连接码给接收方，接收方订阅成功后点击发送文件。");
+      }
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "创建 SFU 发布通道失败。");
     } finally {
@@ -400,11 +438,12 @@ export function SfuTransferPage() {
     }
   }
 
-  async function readReceiverCode() {
+  async function readReceiverCode(codeOverride = receiverCodeInput) {
     try {
       setReceiverError("");
       closeReceiverSession();
-      const code = await decodeConnectionCode(receiverCodeInput);
+      const code = await decodeConnectionCode(codeOverride);
+      setReceiverCodeInput(codeOverride);
       if (!fileSystemReceiveSupported && code.file.size > memoryReceiveLimitBytes) {
         throw new Error(
           `当前浏览器不能直接流式写盘，内存回退只允许 ${formatBytes(memoryReceiveLimitBytes)} 以内的文件。请改用支持文件系统访问的 Chromium 浏览器。`,
@@ -428,6 +467,44 @@ export function SfuTransferPage() {
       setReceiverError(error instanceof Error ? error.message : "读取 SFU 连接码失败。");
     }
   }
+
+  async function receiveWithPickupCode() {
+    const code = receiverPickupInput.trim();
+    if (!/^\d{8}$/.test(code)) {
+      setReceiverError("取件码必须是 8 位数字。");
+      return;
+    }
+
+    try {
+      setIsPickupBusy(true);
+      setReceiverError("");
+      setReceiverStatus("正在读取取件码...");
+      const pickup = await getPickup(code);
+      if (pickup.variant !== "sfu") {
+        onPickupVariantResolved?.({ code, pickup });
+        setReceiverStatus(`取件码属于 ${pickup.variant.toUpperCase()}，正在切换传输方法。`);
+        return;
+      }
+      await readReceiverCode(pickup.offer);
+      setReceiverStatus((current) => current.replace("已读取", `取件码 ${code} 已读取`));
+    } catch (error) {
+      setReceiverError(error instanceof Error ? error.message : "读取取件码失败。");
+    } finally {
+      setIsPickupBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingPickup || pendingPickup.pickup.variant !== "sfu") return;
+    const key = `${pendingPickup.code}:${pendingPickup.pickup.expiresAt}:${pendingPickup.pickup.offer}`;
+    if (consumedPendingPickupRef.current === key) return;
+    consumedPendingPickupRef.current = key;
+    setMode("receive");
+    setReceiverPickupInput(pendingPickup.code);
+    setIsPickupBusy(true);
+    setReceiverStatus(`取件码 ${pendingPickup.code} 已读取，正在解析 SFU 连接码...`);
+    void readReceiverCode(pendingPickup.pickup.offer).finally(() => setIsPickupBusy(false));
+  }, [pendingPickup]);
 
   async function chooseReceiveTarget() {
     if (!parsedReceiverCode) {
@@ -762,13 +839,14 @@ export function SfuTransferPage() {
             <div className="grid gap-3">
               <RoleOption
                 title="发送文件"
-                description="创建发布通道并复制连接码"
+                description={pickupEnabled ? "创建发布通道并生成取件码" : "创建发布通道并复制连接码"}
                 icon={UploadCloud}
                 onClick={() => setMode("send")}
               />
+              {methodSelector}
               <RoleOption
                 title="接收文件"
-                description="粘贴连接码并订阅 SFU DataChannel"
+                description={pickupEnabled ? "输入取件码并订阅 SFU DataChannel" : "粘贴连接码并订阅 SFU DataChannel"}
                 icon={Download}
                 onClick={() => {
                   closeReceiverSession();
@@ -785,6 +863,19 @@ export function SfuTransferPage() {
 
           {mode === "send" && (
             <div className="grid gap-4">
+              {pickupEnabled && (
+                <div className="grid min-h-[128px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] p-4 text-center">
+                  <div>
+                    <div className="text-sm font-bold text-[#526c92]">8 位取件码</div>
+                    <div className="mt-2 font-mono text-[32px] font-black tracking-[0.16em] text-[#061b3a]" data-testid="sender-pickup-code">
+                      {senderPickupCode || (isCreatingPublisher ? "生成中" : "--------")}
+                    </div>
+                    <div className="mt-2 text-xs text-[#526c92]">
+                      {pickupExpiresAt ? `有效至 ${new Date(pickupExpiresAt).toLocaleTimeString("zh-CN")}` : "创建发布通道后生成"}
+                    </div>
+                  </div>
+                </div>
+              )}
               <TextArea
                 label={`发送方 SFU 连接码 ${codeSize}`}
                 value={connectionCode}
@@ -801,6 +892,12 @@ export function SfuTransferPage() {
                   <Copy aria-hidden="true" size={17} />
                   复制连接码
                 </SecondaryButton>
+                {pickupEnabled && (
+                  <SecondaryButton onClick={() => void copyText(senderPickupCode).catch((error) => setSenderError(error.message))} disabled={!senderPickupCode}>
+                    <Copy aria-hidden="true" size={17} />
+                    复制取件码
+                  </SecondaryButton>
+                )}
                 <PrimaryButton onClick={() => void sendSelectedFile()} disabled={!senderReady || isSending || senderProgress >= 100}>
                   <Send aria-hidden="true" size={17} />
                   发送文件
@@ -812,17 +909,36 @@ export function SfuTransferPage() {
 
           {mode === "receive" && (
             <div className="grid gap-4">
-              <TextArea
-                label="发送方 SFU 连接码"
-                value={receiverCodeInput}
-                onChange={handleReceiverCodeInput}
-                placeholder="把发送方复制出来的 SFU 连接码粘贴到这里"
-              />
+              {pickupEnabled ? (
+                <TextInput
+                  label="8 位取件码"
+                  value={receiverPickupInput}
+                  onChange={(value) => {
+                    setReceiverPickupInput(value.replace(/\D/g, "").slice(0, 8));
+                    setReceiverError("");
+                  }}
+                  placeholder="输入发送方提供的 8 位数字"
+                />
+              ) : (
+                <TextArea
+                  label="发送方 SFU 连接码"
+                  value={receiverCodeInput}
+                  onChange={handleReceiverCodeInput}
+                  placeholder="把发送方复制出来的 SFU 连接码粘贴到这里"
+                />
+              )}
               <div className="flex flex-wrap gap-3">
-                <SecondaryButton onClick={() => void readReceiverCode()} disabled={!receiverCodeInput.trim() || isCreatingSubscriber || receiverReady}>
-                  <FileText aria-hidden="true" size={17} />
-                  读取连接码
-                </SecondaryButton>
+                {pickupEnabled ? (
+                  <SecondaryButton onClick={() => void receiveWithPickupCode()} disabled={receiverPickupInput.length !== 8 || isPickupBusy || isCreatingSubscriber || receiverReady}>
+                    <FileText aria-hidden="true" size={17} />
+                    {isPickupBusy ? "读取中..." : "读取取件码"}
+                  </SecondaryButton>
+                ) : (
+                  <SecondaryButton onClick={() => void readReceiverCode()} disabled={!receiverCodeInput.trim() || isCreatingSubscriber || receiverReady}>
+                    <FileText aria-hidden="true" size={17} />
+                    读取连接码
+                  </SecondaryButton>
+                )}
                 {fileSystemReceiveSupported && (
                   <SecondaryButton onClick={() => void chooseReceiveTarget()} disabled={!parsedReceiverCode || isCreatingSubscriber || receiverReady}>
                     <HardDrive aria-hidden="true" size={17} />

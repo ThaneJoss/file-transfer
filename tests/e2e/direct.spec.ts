@@ -26,7 +26,7 @@ test.describe("Direct page", () => {
     await expectNoConsoleErrors(consoleErrors);
   });
 
-  test("opens directly, refreshes in place, marks nav active, and supports history", async ({ page }) => {
+  test("opens home, refreshes in place, and switches methods inline", async ({ page }) => {
     await installAppMocks(page);
     await openRoute(page, "direct");
     await expect(page.getByRole("heading", { name: "连接状态" })).toBeVisible();
@@ -38,11 +38,9 @@ test.describe("Direct page", () => {
     await expect(page).toHaveURL(routePath.direct);
     await expectActiveNav(page, "direct");
 
-    await page.getByTestId("nav-item-stun").click();
-    await expect(page).toHaveURL(routePath.stun);
-    await page.goBack();
+    await page.getByTestId("method-option-stun").click();
+    await expectActiveNav(page, "stun");
     await expect(page).toHaveURL(routePath.direct);
-    await expectActiveNav(page, "direct");
   });
 
   test("creates and copies an 8 digit pickup code after file selection", async ({ page }) => {
@@ -59,7 +57,7 @@ test.describe("Direct page", () => {
     await page.getByRole("button", { name: /重置/ }).click();
     await expect(page.getByRole("heading", { name: "选择传输目标" })).toBeVisible();
     await expect(page.getByRole("button", { name: /发送文件/ })).toBeVisible();
-    await page.getByTestId("nav-item-stun").click();
+    await page.getByTestId("method-option-stun").click();
     await expect(page.evaluate(() => window.__appTest.rtc.closedPeers)).resolves.toBeGreaterThan(0);
   });
 
@@ -155,8 +153,7 @@ test.describe("Direct page", () => {
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "direct-close.txt");
     await expect(page.getByRole("alert")).toContainText("DataChannel 已关闭");
-    await page.getByTestId("nav-item-stun").click();
-    await expect(page).toHaveURL(routePath.stun);
+    await page.getByRole("button", { name: /重置/ }).click();
     await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
     await page.waitForFunction(() => window.__appTest.rtc.closedChannels > 0);
   });

@@ -3,7 +3,6 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   apiBaseUrl,
   collectConsoleErrors,
-  decodeConnectionCodePayload,
   expectNoConsoleErrors,
   installAppMocks,
   openRoute,
@@ -63,8 +62,7 @@ test.describe("TURN page", () => {
     await openRoute(page, "turn");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-auto-offer.txt");
-    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
-    await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
+    await expect(page.getByTestId("sender-pickup-code")).toHaveText("12345678");
   });
 
   test("refreshes usage after TURN credential generation and file send completion", async ({ page }) => {
@@ -82,28 +80,29 @@ test.describe("TURN page", () => {
     await openRoute(page, "turn");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-usage.txt");
-    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
-    await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
+    await expect(page.getByTestId("sender-pickup-code")).toHaveText("12345678");
     await expect.poll(() => usageRequests).toBeGreaterThanOrEqual(2);
     const afterCredentials = usageRequests;
-    await expect(page.getByLabel("本月流量")).toContainText(`TURN ${usageMbLabel(afterCredentials)}`);
+    await expect(page.getByTestId("header-usage-bars")).toContainText("TURN");
 
-    await page.getByRole("button", { name: /复制.*Offer/ }).click();
-    await page.getByLabel(/接收方 TURN Answer/).fill(
-      rawSignalText({
-        kind: "turn-webrtc-signal",
-        role: "answer",
-        descriptionType: "answer",
-        candidateTypes: ["relay"],
+    await page.route(`${apiBaseUrl}/v1/pickups/12345678/answer`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          answer: rawSignalText({
+            kind: "turn-webrtc-signal",
+            role: "answer",
+            descriptionType: "answer",
+            candidateTypes: ["relay"],
+          }),
+        }),
       }),
     );
-    await page.getByRole("button", { name: "发送" }).click();
     await page.waitForFunction(() =>
       window.__appTest.rtc.sentPayloads.some((payload) => payload.kind === "text" && payload.value.includes('"kind":"done"')),
     );
     await expect.poll(() => usageRequests).toBeGreaterThan(afterCredentials);
-    const afterTransfer = usageRequests;
-    await expect(page.getByLabel("本月流量")).toContainText(`TURN ${usageMbLabel(afterTransfer)}`);
+    await expect(page.getByTestId("header-usage-bars")).toContainText("TURN");
   });
 
   test("applies relay-only TURN config when generating an offer", async ({ page }) => {
@@ -111,29 +110,41 @@ test.describe("TURN page", () => {
     await openRoute(page, "turn");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-demo.txt");
-    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
-    await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
-    const offer = await decodeConnectionCodePayload(page, await page.getByLabel(/发送方 TURN Offer/).inputValue());
-    expect(JSON.stringify(offer)).not.toMatch(/temporary-password|apiToken|TURN Token/i);
+    await expect(page.getByTestId("sender-pickup-code")).toHaveText("12345678");
     await expect(
       page.evaluate(() => window.__appTest.rtc.createdConfigs.some((config) => config.iceTransportPolicy === "relay")),
     ).resolves.toBe(true);
   });
 
-  test("generates TURN credentials automatically when creating an answer", async ({ page }) => {
+  test("generates TURN credentials automatically when answering from a pickup code", async ({ page }) => {
     await mockTurnSuccess(page);
-    await openRoute(page, "turn");
-    await page.getByRole("button", { name: /接收文件/ }).click();
-    await page.getByLabel(/发送方 TURN Offer/).fill(
-      rawSignalText({
-        kind: "turn-webrtc-signal",
-        role: "offer",
-        descriptionType: "offer",
-        candidateTypes: ["relay"],
+    let submittedAnswer = "";
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "turn",
+          offer: rawSignalText({
+            kind: "turn-webrtc-signal",
+            role: "offer",
+            descriptionType: "offer",
+            candidateTypes: ["relay"],
+          }),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
       }),
     );
-    await page.getByRole("button", { name: /生成 TURN Answer/ }).click();
-    await expect(page.getByText(/已连接|接收方 TURN Answer/)).toBeVisible();
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321/answer`, async (route) => {
+      submittedAnswer = (await route.request().postDataJSON() as { answer: string }).answer;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+    });
+    await openRoute(page, "turn");
+    await page.getByRole("button", { name: /接收文件/ }).click();
+    await page.getByLabel("8 位取件码").fill("87654321");
+    await page.getByRole("button", { name: "取件并连接" }).click();
+    await expect.poll(() => submittedAnswer).toMatch(/^[DJ]1\./);
     await expect(
       page.evaluate(() => window.__appTest.rtc.createdConfigs.some((config) => config.iceTransportPolicy === "relay")),
     ).resolves.toBe(true);
@@ -151,21 +162,19 @@ test.describe("TURN page", () => {
       await openRoute(page, "turn");
       await page.getByRole("button", { name: /发送文件/ }).click();
       await selectFile(page, `turn-${status}.txt`);
-      await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
       await expect(page.getByRole("alert")).toContainText(`mock ${status}`);
     });
   }
 
-  test("returns to login when the TURN API reports an expired session", async ({ page }) => {
+  test("shows the login notice when the TURN API reports an expired session", async ({ page }) => {
     await page.route(`${apiBaseUrl}/v1/turn/credentials`, (route) =>
       route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Unauthorized" }) }),
     );
     await openRoute(page, "turn");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-session.txt");
-    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
-    await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole("alert")).toContainText("登录已过期");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "TURN 需要登录" })).toBeVisible();
   });
 
   test("reports network interruption during TURN credential generation", async ({ page }) => {
@@ -173,7 +182,6 @@ test.describe("TURN page", () => {
     await openRoute(page, "turn");
     await page.getByRole("button", { name: /发送文件/ }).click();
     await selectFile(page, "turn-network.txt");
-    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
     await expect(page.getByRole("alert")).toContainText(/Failed to fetch|TURN iceServers 生成失败/);
   });
 });
@@ -194,8 +202,4 @@ function usageResponse(turnMegabytes: number) {
     totalBytes: (turnMegabytes + 7) * mebibyte,
     totalQuotaBytes: 30 * mebibyte,
   };
-}
-
-function usageMbLabel(megabytes: number) {
-  return `${megabytes.toFixed(2)} MB`;
 }

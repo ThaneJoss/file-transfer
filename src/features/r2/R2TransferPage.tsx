@@ -13,9 +13,9 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, ReactNode } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
 import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
 import {
   formatFetchError,
@@ -44,7 +44,10 @@ import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
 import { notifyApiUsageChanged } from "../../lib/api/client";
+import { useAuth } from "../../lib/auth/AuthProvider";
 import { formatBytes, formatPercent } from "../../lib/files/format";
+import { createPickup, getPickup } from "../transfer/services/pickupApi";
+import type { PendingPickup } from "../transfer/services/pickupApi";
 
 type R2ConnectionCode = {
   kind: "cloudflare-r2-file-v1";
@@ -101,17 +104,30 @@ async function decodeConnectionCode(value: string): Promise<R2ConnectionCode> {
   return payload;
 }
 
-export function R2TransferPage() {
+export function R2TransferPage({
+  methodSelector,
+  pendingPickup,
+  onPickupVariantResolved,
+}: {
+  methodSelector?: ReactNode;
+  pendingPickup?: PendingPickup | null;
+  onPickupVariantResolved?: (pending: PendingPickup) => void;
+}) {
+  const { session } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const credentialRequestRef = useRef(0);
+  const consumedPendingPickupRef = useRef("");
 
   const [credentials, setCredentials] = useState<R2TemporaryCredentials | null>(null);
   const [mode, setMode] = useState<Mode>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [objectKey, setObjectKey] = useState("");
   const [connectionCode, setConnectionCode] = useState("");
+  const [senderPickupCode, setSenderPickupCode] = useState("");
+  const [pickupExpiresAt, setPickupExpiresAt] = useState<number | null>(null);
   const [receiverCodeInput, setReceiverCodeInput] = useState("");
+  const [receiverPickupInput, setReceiverPickupInput] = useState("");
   const [incomingCode, setIncomingCode] = useState<R2ConnectionCode | null>(null);
   const [senderStatus, setSenderStatus] = useState("选择文件后申请临时 R2 凭证并上传。");
   const [receiverStatus, setReceiverStatus] = useState("粘贴 R2 连接码后下载文件。");
@@ -124,8 +140,10 @@ export function R2TransferPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isRequestingCredentials, setIsRequestingCredentials] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isPickupBusy, setIsPickupBusy] = useState(false);
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
+  const pickupEnabled = Boolean(session?.user);
 
   useEffect(() => {
     return () => {
@@ -159,7 +177,10 @@ export function R2TransferPage() {
     setCredentials(null);
     setObjectKey("");
     setConnectionCode("");
+    setSenderPickupCode("");
+    setPickupExpiresAt(null);
     setReceiverCodeInput("");
+    setReceiverPickupInput("");
     setIncomingCode(null);
     setSenderStatus("选择文件后申请临时 R2 凭证并上传。");
     setReceiverStatus("粘贴 R2 连接码后下载文件。");
@@ -172,6 +193,7 @@ export function R2TransferPage() {
     setIsUploading(false);
     setIsRequestingCredentials(false);
     setIsDownloading(false);
+    setIsPickupBusy(false);
     clearReceivedFiles();
   }
 
@@ -182,6 +204,8 @@ export function R2TransferPage() {
     setCredentials(null);
     setObjectKey("");
     setConnectionCode("");
+    setSenderPickupCode("");
+    setPickupExpiresAt(null);
     setUploadedBytes(0);
     setSenderProgress(0);
     if (file) {
@@ -277,7 +301,20 @@ export function R2TransferPage() {
       setUploadedBytes(selectedFile.size);
       setSenderProgress(100);
       setConnectionCode(code);
-      setSenderStatus(`文件已上传到 R2。预签名下载链接有效期 ${expiresIn} 秒，复制连接码给接收方。`);
+      if (pickupEnabled) {
+        setSenderStatus("文件已上传到 R2，正在写入取件码...");
+        try {
+          const pickup = await createPickup("r2", code);
+          setSenderPickupCode(pickup.code);
+          setPickupExpiresAt(pickup.expiresAt);
+          setSenderStatus(`取件码 ${pickup.code} 已生成。预签名下载链接有效期 ${expiresIn} 秒。`);
+        } catch (error) {
+          setSenderError(`文件已上传到 R2，但取件码生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+          setSenderStatus(`可先复制连接码给接收方。预签名下载链接有效期 ${expiresIn} 秒。`);
+        }
+      } else {
+        setSenderStatus(`文件已上传到 R2。预签名下载链接有效期 ${expiresIn} 秒，复制连接码给接收方。`);
+      }
       notifyApiUsageChanged();
     } catch (error) {
       setSenderError(formatFetchError(error));
@@ -288,12 +325,13 @@ export function R2TransferPage() {
     }
   }
 
-  async function parseReceiverCode() {
+  async function parseReceiverCode(codeOverride = receiverCodeInput) {
     try {
       setReceiverError("");
       setDownloadedBytes(0);
       setReceiverProgress(0);
-      const code = await decodeConnectionCode(receiverCodeInput);
+      const code = await decodeConnectionCode(codeOverride);
+      setReceiverCodeInput(codeOverride);
       setIncomingCode(code);
       setReceiverStatus(
         code.presignedUrl
@@ -304,6 +342,44 @@ export function R2TransferPage() {
       setReceiverError(error instanceof Error ? error.message : "读取 R2 连接码失败。");
     }
   }
+
+  async function receiveWithPickupCode() {
+    const code = receiverPickupInput.trim();
+    if (!/^\d{8}$/.test(code)) {
+      setReceiverError("取件码必须是 8 位数字。");
+      return;
+    }
+
+    try {
+      setIsPickupBusy(true);
+      setReceiverError("");
+      setReceiverStatus("正在读取取件码...");
+      const pickup = await getPickup(code);
+      if (pickup.variant !== "r2") {
+        onPickupVariantResolved?.({ code, pickup });
+        setReceiverStatus(`取件码属于 ${pickup.variant.toUpperCase()}，正在切换传输方法。`);
+        return;
+      }
+      await parseReceiverCode(pickup.offer);
+      setReceiverStatus((current) => current.replace("已读取连接码", `取件码 ${code} 已读取`));
+    } catch (error) {
+      setReceiverError(error instanceof Error ? error.message : "读取取件码失败。");
+    } finally {
+      setIsPickupBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingPickup || pendingPickup.pickup.variant !== "r2") return;
+    const key = `${pendingPickup.code}:${pendingPickup.pickup.expiresAt}:${pendingPickup.pickup.offer}`;
+    if (consumedPendingPickupRef.current === key) return;
+    consumedPendingPickupRef.current = key;
+    setMode("receive");
+    setReceiverPickupInput(pendingPickup.code);
+    setIsPickupBusy(true);
+    setReceiverStatus(`取件码 ${pendingPickup.code} 已读取，正在解析 R2 下载信息...`);
+    void parseReceiverCode(pendingPickup.pickup.offer).finally(() => setIsPickupBusy(false));
+  }, [pendingPickup]);
 
   async function downloadFromR2() {
     try {
@@ -449,13 +525,14 @@ export function R2TransferPage() {
             <div className="grid gap-3">
               <RoleOption
                 title="发送文件"
-                description="上传到 R2 并复制连接码"
+                description={pickupEnabled ? "上传到 R2 并生成取件码" : "上传到 R2 并复制连接码"}
                 icon={UploadCloud}
                 onClick={() => setMode("send")}
               />
+              {methodSelector}
               <RoleOption
                 title="接收文件"
-                description="粘贴连接码并从 R2 拉取"
+                description={pickupEnabled ? "输入取件码并从 R2 拉取" : "粘贴连接码并从 R2 拉取"}
                 icon={Download}
                 onClick={() => {
                   credentialRequestRef.current += 1;
@@ -464,6 +541,8 @@ export function R2TransferPage() {
                   setIsRequestingCredentials(false);
                   setObjectKey("");
                   setConnectionCode("");
+                  setSenderPickupCode("");
+                  setPickupExpiresAt(null);
                   setMode("receive");
                 }}
               />
@@ -472,6 +551,19 @@ export function R2TransferPage() {
 
           {mode === "send" && (
             <div className="grid gap-4">
+              {pickupEnabled && (
+                <div className="grid min-h-[128px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] p-4 text-center">
+                  <div>
+                    <div className="text-sm font-bold text-[#526c92]">8 位取件码</div>
+                    <div className="mt-2 font-mono text-[32px] font-black tracking-[0.16em] text-[#061b3a]" data-testid="sender-pickup-code">
+                      {senderPickupCode || (isUploading ? "生成中" : "--------")}
+                    </div>
+                    <div className="mt-2 text-xs text-[#526c92]">
+                      {pickupExpiresAt ? `有效至 ${new Date(pickupExpiresAt).toLocaleTimeString("zh-CN")}` : "上传完成后生成"}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="rounded-xl border border-[#d7e5f6] bg-[#f7fbff] px-4 py-3 text-sm text-[#365a88]">
                 <strong className="block text-[#233d64]">服务端对象 Key</strong>
                 <span className="mt-1 block truncate font-mono text-xs" title={objectKey}>{objectKey || (isRequestingCredentials ? "正在申请..." : "选择文件后生成")}</span>
@@ -492,6 +584,12 @@ export function R2TransferPage() {
                   <Copy aria-hidden="true" size={17} />
                   复制连接码
                 </SecondaryButton>
+                {pickupEnabled && (
+                  <SecondaryButton onClick={() => void copyText(senderPickupCode).catch((error) => setSenderError(error.message))} disabled={!senderPickupCode}>
+                    <Copy aria-hidden="true" size={17} />
+                    复制取件码
+                  </SecondaryButton>
+                )}
               </div>
               <StatusMessage message={senderError || senderStatus} tone={senderError ? "error" : "info"} />
             </div>
@@ -499,17 +597,36 @@ export function R2TransferPage() {
 
           {mode === "receive" && (
             <div className="grid gap-4">
-              <TextArea
-                label="发送方 R2 连接码"
-                value={receiverCodeInput}
-                onChange={setReceiverCodeInput}
-                placeholder="把发送方复制出来的 R2 连接码粘贴到这里"
-              />
+              {pickupEnabled ? (
+                <TextInput
+                  label="8 位取件码"
+                  value={receiverPickupInput}
+                  onChange={(value) => {
+                    setReceiverPickupInput(value.replace(/\D/g, "").slice(0, 8));
+                    setReceiverError("");
+                  }}
+                  placeholder="输入发送方提供的 8 位数字"
+                />
+              ) : (
+                <TextArea
+                  label="发送方 R2 连接码"
+                  value={receiverCodeInput}
+                  onChange={setReceiverCodeInput}
+                  placeholder="把发送方复制出来的 R2 连接码粘贴到这里"
+                />
+              )}
               <div className="flex flex-wrap gap-3">
-                <SecondaryButton onClick={() => void parseReceiverCode()} disabled={!receiverCodeInput.trim()}>
-                  <FileText aria-hidden="true" size={17} />
-                  读取连接码
-                </SecondaryButton>
+                {pickupEnabled ? (
+                  <SecondaryButton onClick={() => void receiveWithPickupCode()} disabled={receiverPickupInput.length !== 8 || isPickupBusy}>
+                    <FileText aria-hidden="true" size={17} />
+                    {isPickupBusy ? "读取中..." : "读取取件码"}
+                  </SecondaryButton>
+                ) : (
+                  <SecondaryButton onClick={() => void parseReceiverCode()} disabled={!receiverCodeInput.trim()}>
+                    <FileText aria-hidden="true" size={17} />
+                    读取连接码
+                  </SecondaryButton>
+                )}
                 <PrimaryButton onClick={() => void downloadFromR2()} disabled={isDownloading || (!incomingCode && !receiverCodeInput.trim())}>
                   <Download aria-hidden="true" size={17} />
                   下载文件
