@@ -81,6 +81,30 @@ test.describe("authentication", () => {
     await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
   });
 
+  test("refreshes usage when entering the account page and clicking refresh", async ({ page }) => {
+    await installAppMocks(page);
+    await page.unroute(`${apiBaseUrl}/v1/usage`);
+    let usageRequests = 0;
+    await page.route(`${apiBaseUrl}/v1/usage`, (route) => {
+      usageRequests += 1;
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(usageResponse(usageRequests)),
+      });
+    });
+
+    await page.goto("/account");
+    await expect(page.getByTestId("user-usage-page")).toBeVisible();
+    await expect.poll(() => usageRequests).toBeGreaterThanOrEqual(2);
+    const enteredVersion = usageRequests;
+    await expect(page.getByTestId("usage-card-turn")).toContainText(usageMbLabel(enteredVersion));
+
+    await page.getByRole("button", { name: /^刷新$/ }).click();
+    await expect.poll(() => usageRequests).toBeGreaterThan(enteredVersion);
+    const refreshedVersion = usageRequests;
+    await expect(page.getByTestId("usage-card-turn")).toContainText(usageMbLabel(refreshedVersion));
+  });
+
   test("registers with passkey registration context", async ({ page }) => {
     await installAppMocks(page);
     await installWebAuthnMocks(page);
@@ -155,4 +179,26 @@ test.describe("authentication", () => {
 function apiRoutePattern(path: string) {
   const escapedBaseUrl = apiBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`^${escapedBaseUrl}${path}(?:\\?.*)?$`);
+}
+
+function usageResponse(turnMegabytes: number) {
+  const mebibyte = 1024 * 1024;
+  return {
+    period: {
+      start: "2026-06-01T00:00:00.000Z",
+      end: "2026-06-20T04:00:00.000Z",
+      timezone: "UTC",
+    },
+    summary: [
+      { service: "turn", bytes: turnMegabytes * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "sfu", bytes: 4 * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "r2", bytes: 3 * mebibyte, quotaBytes: 10 * mebibyte },
+    ],
+    totalBytes: (turnMegabytes + 7) * mebibyte,
+    totalQuotaBytes: 30 * mebibyte,
+  };
+}
+
+function usageMbLabel(megabytes: number) {
+  return `${megabytes.toFixed(2)} MB`;
 }

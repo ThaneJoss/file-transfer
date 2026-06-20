@@ -10,7 +10,7 @@ describe("Cloudflare TURN service", () => {
       http.post("https://api.file.thanejoss.com/v1/turn/credentials", async ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(request.headers.get("authorization")).toBeNull();
-        expect(await request.json()).toEqual({ ttlSeconds: 3600 });
+        expect(await request.json()).toEqual({ ttlSeconds: 3600, fileSizeBytes: 1024 });
         return HttpResponse.json({
           iceServers: [
             {
@@ -23,7 +23,7 @@ describe("Cloudflare TURN service", () => {
       }),
     );
 
-    await expect(generateCloudflareTurnIceServers(3600)).resolves.toEqual([
+    await expect(generateCloudflareTurnIceServers(3600, 1024)).resolves.toEqual([
       {
         urls: ["turn:example.com:3478?transport=udp", "turn:example.com:3478?transport=tcp"],
         username: "user",
@@ -39,7 +39,7 @@ describe("Cloudflare TURN service", () => {
       ),
     );
 
-    await expect(generateCloudflareTurnIceServers(3600)).rejects.toThrow("Unauthorized");
+    await expect(generateCloudflareTurnIceServers(3600, undefined)).rejects.toThrow("Unauthorized");
   });
 
   it("normalizes only valid RTCIceServer objects", () => {

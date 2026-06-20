@@ -17,7 +17,9 @@ async function mockTurnSuccess(page: Page) {
     const request = route.request();
     expect(request.method()).toBe("POST");
     expect(request.headers().authorization).toBeUndefined();
-    expect(await request.postDataJSON()).toEqual({ ttlSeconds: 3600 });
+    const body = await request.postDataJSON();
+    expect(body).toEqual(expect.objectContaining({ ttlSeconds: 3600 }));
+    if ("fileSizeBytes" in body) expect(body.fileSizeBytes).toBe(16);
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -63,6 +65,45 @@ test.describe("TURN page", () => {
     await selectFile(page, "turn-auto-offer.txt");
     await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
     await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
+  });
+
+  test("refreshes usage after TURN credential generation and file send completion", async ({ page }) => {
+    await mockTurnSuccess(page);
+    await page.unroute(`${apiBaseUrl}/v1/usage`);
+    let usageRequests = 0;
+    await page.route(`${apiBaseUrl}/v1/usage`, (route) => {
+      usageRequests += 1;
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(usageResponse(usageRequests)),
+      });
+    });
+
+    await openRoute(page, "turn");
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await selectFile(page, "turn-usage.txt");
+    await page.getByRole("button", { name: /生成 TURN Offer/ }).click();
+    await expect(page.getByLabel(/发送方 TURN Offer/)).not.toHaveValue("");
+    await expect.poll(() => usageRequests).toBeGreaterThanOrEqual(2);
+    const afterCredentials = usageRequests;
+    await expect(page.getByLabel("本月流量")).toContainText(`TURN ${usageMbLabel(afterCredentials)}`);
+
+    await page.getByRole("button", { name: /复制.*Offer/ }).click();
+    await page.getByLabel(/接收方 TURN Answer/).fill(
+      rawSignalText({
+        kind: "turn-webrtc-signal",
+        role: "answer",
+        descriptionType: "answer",
+        candidateTypes: ["relay"],
+      }),
+    );
+    await page.getByRole("button", { name: "发送" }).click();
+    await page.waitForFunction(() =>
+      window.__appTest.rtc.sentPayloads.some((payload) => payload.kind === "text" && payload.value.includes('"kind":"done"')),
+    );
+    await expect.poll(() => usageRequests).toBeGreaterThan(afterCredentials);
+    const afterTransfer = usageRequests;
+    await expect(page.getByLabel("本月流量")).toContainText(`TURN ${usageMbLabel(afterTransfer)}`);
   });
 
   test("applies relay-only TURN config when generating an offer", async ({ page }) => {
@@ -136,3 +177,25 @@ test.describe("TURN page", () => {
     await expect(page.getByRole("alert")).toContainText(/Failed to fetch|TURN iceServers 生成失败/);
   });
 });
+
+function usageResponse(turnMegabytes: number) {
+  const mebibyte = 1024 * 1024;
+  return {
+    period: {
+      start: "2026-06-01T00:00:00.000Z",
+      end: "2026-06-20T04:00:00.000Z",
+      timezone: "UTC",
+    },
+    summary: [
+      { service: "turn", bytes: turnMegabytes * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "sfu", bytes: 4 * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "r2", bytes: 3 * mebibyte, quotaBytes: 10 * mebibyte },
+    ],
+    totalBytes: (turnMegabytes + 7) * mebibyte,
+    totalQuotaBytes: 30 * mebibyte,
+  };
+}
+
+function usageMbLabel(megabytes: number) {
+  return `${megabytes.toFixed(2)} MB`;
+}

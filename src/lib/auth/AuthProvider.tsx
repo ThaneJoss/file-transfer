@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUsage(emptyUsage);
       return;
     }
-    const response = await apiRequest<UsageApiResponse>("/v1/usage");
+    const response = await apiRequest<UsageApiResponse>("/v1/usage", { cache: "no-store" });
     setUsage(normalizeUsageResponse(response));
   }, [data?.user, invalidated]);
 

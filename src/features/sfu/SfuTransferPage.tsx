@@ -46,6 +46,7 @@ import {
 import type { MetricItem, TransferStepItem } from "../../layout/TransferLayout";
 import { copyText } from "../../lib/browser/clipboard";
 import { saveBlob } from "../../lib/browser/download";
+import { notifyApiUsageChanged } from "../../lib/api/client";
 import { createStableId } from "../../lib/browser/stableId";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 
@@ -423,6 +424,7 @@ export function SfuTransferPage() {
       setSentBytes(file.size);
       setSenderProgress(100);
       setSenderStatus("文件已发送完成。");
+      notifyApiUsageChanged();
     } catch (error) {
       setSenderError(error instanceof Error ? error.message : "发送文件失败。");
     } finally {
@@ -475,6 +477,7 @@ export function SfuTransferPage() {
         setReceivedBytes(blob.size);
         setReceiverStatus("文件接收完成，已触发浏览器下载。");
         saveBlob(receivedFile);
+        notifyApiUsageChanged();
         receiveChunksRef.current = [];
         receiveMetaRef.current = null;
         setIncomingMeta(null);
