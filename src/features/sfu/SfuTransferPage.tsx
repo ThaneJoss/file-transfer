@@ -27,6 +27,25 @@ import {
   establishDataChannelTransport,
 } from "./services/callsApi";
 import { callsApiOrigin } from "./services/callsApi";
+import {
+  createSha256Hasher,
+  decodeSfuFileChunk,
+  encodeSfuFileChunk,
+  getSfuChunkPayloadSize,
+  memoryReceiveLimitBytes,
+  openReceiveSink,
+  pickFileSystemReceiveTarget,
+  sfuFileProtocolKind,
+  sha256File,
+  supportsFileSystemReceive,
+} from "./services/fileTransfer";
+import type {
+  ReceiveSink,
+  ReceiveTarget,
+  SfuTransferDone,
+  SfuTransferFile,
+  SfuTransferMeta,
+} from "./services/fileTransfer";
 import { decodeConnectionPayload, encodeConnectionPayload } from "../transfer/protocol/connectionCode";
 import { waitForBuffer, waitForDataChannelOpen } from "../transfer/services/dataChannel";
 import {
@@ -50,23 +69,11 @@ import { notifyApiUsageChanged } from "../../lib/api/client";
 import { createStableId } from "../../lib/browser/stableId";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 
-type TransferMeta = {
-  kind: "meta";
-  name: string;
-  size: number;
-  type: string;
-  lastModified: number;
-};
-
-type TransferDone = {
-  kind: "done";
-};
-
 type SfuConnectionCode = {
-  kind: "cloudflare-sfu-file-v1";
+  kind: typeof sfuFileProtocolKind;
   publisherSessionId: string;
   dataChannelName: string;
-  file: Omit<TransferMeta, "kind">;
+  file: SfuTransferFile;
   createdAt: number;
 };
 
@@ -75,13 +82,21 @@ type ReceivedFile = {
   name: string;
   size: number;
   type: string;
-  url: string;
+  url: string | null;
+  savedToDisk: boolean;
   receivedAt: string;
+};
+
+type ReceiveState = {
+  meta: SfuTransferMeta;
+  sink: ReceiveSink;
+  hasher: ReturnType<typeof createSha256Hasher>;
+  nextSequence: number;
+  bytes: number;
 };
 
 type Mode = "send" | "receive" | null;
 
-const chunkSize = 256 * 1024;
 const highWaterMark = 16 * 1024 * 1024;
 const lowWaterMark = 4 * 1024 * 1024;
 const progressUpdateIntervalMs = 100;
@@ -99,11 +114,18 @@ async function decodeConnectionCode(value: string): Promise<SfuConnectionCode> {
 
   const payload = JSON.parse(json) as SfuConnectionCode;
   if (
-    payload.kind !== "cloudflare-sfu-file-v1" ||
+    payload.kind !== sfuFileProtocolKind ||
     !payload.publisherSessionId ||
     !payload.dataChannelName ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.file?.fileId ?? "") ||
     !payload.file?.name ||
-    typeof payload.file.size !== "number"
+    !Number.isSafeInteger(payload.file.size) ||
+    payload.file.size < 0 ||
+    !Number.isSafeInteger(payload.file.chunkSize) ||
+    payload.file.chunkSize <= 0 ||
+    !Number.isSafeInteger(payload.file.totalChunks) ||
+    payload.file.totalChunks < 0 ||
+    payload.file.totalChunks !== (payload.file.size === 0 ? 0 : Math.ceil(payload.file.size / payload.file.chunkSize))
   ) {
     throw new Error("SFU 连接码格式不正确。");
   }
@@ -128,8 +150,9 @@ export function SfuTransferPage() {
   const receiverSessionRef = useRef<CallsSession | null>(null);
   const senderChannelRef = useRef<RTCDataChannel | null>(null);
   const receiverChannelRef = useRef<RTCDataChannel | null>(null);
-  const receiveChunksRef = useRef<ArrayBuffer[]>([]);
-  const receiveMetaRef = useRef<TransferMeta | null>(null);
+  const receiveStateRef = useRef<ReceiveState | null>(null);
+  const receiveTargetRef = useRef<ReceiveTarget | null>(null);
+  const receiveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const receivedBytesRef = useRef(0);
   const receiveProgressUpdateAtRef = useRef(0);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
@@ -140,6 +163,9 @@ export function SfuTransferPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [connectionCode, setConnectionCode] = useState("");
   const [receiverCodeInput, setReceiverCodeInput] = useState("");
+  const [parsedReceiverCode, setParsedReceiverCode] = useState<SfuConnectionCode | null>(null);
+  const [receiveTargetLabel, setReceiveTargetLabel] = useState("");
+  const [senderTransfer, setSenderTransfer] = useState<SfuTransferFile | null>(null);
   const [senderStatus, setSenderStatus] = useState("选择文件后通过后端创建 SFU 发布通道。");
   const [receiverStatus, setReceiverStatus] = useState("粘贴发送方 SFU 连接码后订阅 DataChannel。");
   const [senderError, setSenderError] = useState("");
@@ -153,7 +179,7 @@ export function SfuTransferPage() {
   const [publisherSessionId, setPublisherSessionId] = useState("");
   const [subscriberSessionId, setSubscriberSessionId] = useState("");
   const [dataChannelName, setDataChannelName] = useState("");
-  const [incomingMeta, setIncomingMeta] = useState<TransferMeta | null>(null);
+  const [incomingMeta, setIncomingMeta] = useState<SfuTransferFile | null>(null);
   const [sentBytes, setSentBytes] = useState(0);
   const [receivedBytes, setReceivedBytes] = useState(0);
   const [senderProgress, setSenderProgress] = useState(0);
@@ -166,12 +192,15 @@ export function SfuTransferPage() {
 
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
+  const fileSystemReceiveSupported = supportsFileSystemReceive();
 
   useEffect(() => {
     return () => {
       closeSenderSession();
       closeReceiverSession();
-      receivedFilesRef.current.forEach((file) => URL.revokeObjectURL(file.url));
+      receivedFilesRef.current.forEach((file) => {
+        if (file.url) URL.revokeObjectURL(file.url);
+      });
     };
   }, []);
 
@@ -194,18 +223,25 @@ export function SfuTransferPage() {
     senderSessionRef.current?.peerConnection.close();
     senderChannelRef.current = null;
     senderSessionRef.current = null;
+    setSenderTransfer(null);
     setSenderPeerState("new");
     setSenderIceState("new");
     setSenderChannelState("closed");
   }
 
-  function closeReceiverSession() {
+  function closeReceiverSession(preserveTarget = false) {
     receiverChannelRef.current?.close();
     receiverSessionRef.current?.peerConnection.close();
     receiverChannelRef.current = null;
     receiverSessionRef.current = null;
-    receiveChunksRef.current = [];
-    receiveMetaRef.current = null;
+    const receiveState = receiveStateRef.current;
+    receiveStateRef.current = null;
+    if (receiveState) void receiveState.sink.abort();
+    receiveQueueRef.current = Promise.resolve();
+    if (!preserveTarget) {
+      receiveTargetRef.current = null;
+      setReceiveTargetLabel("");
+    }
     receivedBytesRef.current = 0;
     receiveProgressUpdateAtRef.current = 0;
     setReceiverPeerState("new");
@@ -222,6 +258,8 @@ export function SfuTransferPage() {
     setSelectedFile(null);
     setConnectionCode("");
     setReceiverCodeInput("");
+    setParsedReceiverCode(null);
+    setSenderTransfer(null);
     setSenderStatus("选择文件后通过后端创建 SFU 发布通道。");
     setReceiverStatus("粘贴发送方 SFU 连接码后订阅 DataChannel。");
     setSenderError("");
@@ -238,8 +276,10 @@ export function SfuTransferPage() {
   }
 
   function handleFile(file: File | null) {
+    closeSenderSession();
     setSelectedFile(file);
     setConnectionCode("");
+    setSenderTransfer(null);
     setSentBytes(0);
     setSenderProgress(0);
     if (file) setSenderStatus(`已选择 ${file.name}，可以创建 SFU 发布通道。`);
@@ -252,6 +292,17 @@ export function SfuTransferPage() {
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     handleFile(event.dataTransfer.files?.[0] ?? null);
+  }
+
+  function handleReceiverCodeInput(value: string) {
+    closeReceiverSession();
+    setReceiverCodeInput(value);
+    setParsedReceiverCode(null);
+    setIncomingMeta(null);
+    setReceivedBytes(0);
+    setReceiverProgress(0);
+    setReceiverError("");
+    setReceiverStatus(value.trim() ? "请先读取 SFU 连接码。" : "粘贴发送方 SFU 连接码后订阅 DataChannel。");
   }
 
   function attachSenderChannel(channel: RTCDataChannel) {
@@ -284,7 +335,9 @@ export function SfuTransferPage() {
       setReceiverChannelState(channel.readyState);
     });
     channel.addEventListener("message", (event) => {
-      void handleReceiverMessage(event.data);
+      receiveQueueRef.current = receiveQueueRef.current
+        .then(() => handleReceiverMessage(event.data))
+        .catch((error) => handleReceiveFailure(error));
     });
   }
 
@@ -293,6 +346,7 @@ export function SfuTransferPage() {
       setSenderError("请先选择一个文件。");
       return;
     }
+    const file = selectedFile;
 
     try {
       setIsCreatingPublisher(true);
@@ -318,16 +372,23 @@ export function SfuTransferPage() {
       attachSenderChannel(channel);
       await waitForDataChannelOpen(channel, peer, { timeoutMs: channelOpenTimeoutMs });
 
+      const chunkSize = getSfuChunkPayloadSize(peer);
+      const transfer: SfuTransferFile = {
+        fileId: createStableId(),
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+        chunkSize,
+        totalChunks: file.size === 0 ? 0 : Math.ceil(file.size / chunkSize),
+      };
+      setSenderTransfer(transfer);
+
       const code = await encodeConnectionCode({
-        kind: "cloudflare-sfu-file-v1",
+        kind: sfuFileProtocolKind,
         publisherSessionId: session.id,
         dataChannelName: channelName,
-        file: {
-          name: selectedFile.name,
-          size: selectedFile.size,
-          type: selectedFile.type,
-          lastModified: selectedFile.lastModified,
-        },
+        file: transfer,
         createdAt: Date.now(),
       });
       setConnectionCode(code);
@@ -339,20 +400,65 @@ export function SfuTransferPage() {
     }
   }
 
+  async function readReceiverCode() {
+    try {
+      setReceiverError("");
+      closeReceiverSession();
+      const code = await decodeConnectionCode(receiverCodeInput);
+      if (!fileSystemReceiveSupported && code.file.size > memoryReceiveLimitBytes) {
+        throw new Error(
+          `当前浏览器不能直接流式写盘，内存回退只允许 ${formatBytes(memoryReceiveLimitBytes)} 以内的文件。请改用支持文件系统访问的 Chromium 浏览器。`,
+        );
+      }
+
+      setParsedReceiverCode(code);
+      setIncomingMeta(code.file);
+      setPublisherSessionId(code.publisherSessionId);
+      setDataChannelName(code.dataChannelName);
+      if (fileSystemReceiveSupported) {
+        setReceiverStatus(`已读取 ${code.file.name}，请先选择保存位置。`);
+      } else {
+        receiveTargetRef.current = { kind: "memory" };
+        setReceiveTargetLabel("浏览器内存");
+        setReceiverStatus(`已读取 ${code.file.name}，当前浏览器将使用内存接收并在完成后下载。`);
+      }
+    } catch (error) {
+      setParsedReceiverCode(null);
+      setIncomingMeta(null);
+      setReceiverError(error instanceof Error ? error.message : "读取 SFU 连接码失败。");
+    }
+  }
+
+  async function chooseReceiveTarget() {
+    if (!parsedReceiverCode) {
+      setReceiverError("请先读取 SFU 连接码。");
+      return;
+    }
+    try {
+      setReceiverError("");
+      const target = await pickFileSystemReceiveTarget(parsedReceiverCode.file.name);
+      receiveTargetRef.current = target;
+      setReceiveTargetLabel(target.kind === "file-system" ? target.handle.name : "浏览器内存");
+      setReceiverStatus(`保存位置已准备：${target.kind === "file-system" ? target.handle.name : "浏览器内存"}。`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setReceiverError(error instanceof Error ? error.message : "选择保存位置失败。");
+    }
+  }
+
   async function subscribeToPublisher() {
     try {
+      const code = parsedReceiverCode;
+      if (!code) throw new Error("请先读取 SFU 连接码。");
+      if (!receiveTargetRef.current) throw new Error("请先选择保存位置。");
       setIsCreatingSubscriber(true);
       setReceiverError("");
       setReceiverProgress(0);
       setReceivedBytes(0);
-      receiveChunksRef.current = [];
-      receiveMetaRef.current = null;
       receivedBytesRef.current = 0;
-      closeReceiverSession();
+      closeReceiverSession(true);
 
-      const code = await decodeConnectionCode(receiverCodeInput);
-      const meta: TransferMeta = { kind: "meta", ...code.file };
-      setIncomingMeta(meta);
+      setIncomingMeta(code.file);
       setPublisherSessionId(code.publisherSessionId);
       setDataChannelName(code.dataChannelName);
       setReceiverStatus("正在创建接收方 Cloudflare SFU session...");
@@ -380,26 +486,38 @@ export function SfuTransferPage() {
   async function sendSelectedFile() {
     const file = selectedFile;
     const channel = senderChannelRef.current;
-    if (!file || !channel || channel.readyState !== "open" || isSending || sendInFlightRef.current || senderProgress >= 100) return;
+    const transfer = senderTransfer;
+    if (!file || !channel || !transfer || channel.readyState !== "open" || isSending || sendInFlightRef.current || senderProgress >= 100) return;
+    if (
+      file.name !== transfer.name ||
+      file.size !== transfer.size ||
+      file.lastModified !== transfer.lastModified
+    ) {
+      setSenderError("文件已经变化，请重新创建 SFU 发布通道。");
+      return;
+    }
 
     sendInFlightRef.current = true;
     try {
       setIsSending(true);
       setSenderError("");
-      setSenderStatus("正在通过 Cloudflare SFU DataChannel 发送文件...");
+      setSenderStatus("正在计算文件 SHA-256...");
       setSentBytes(0);
       setSenderProgress(0);
 
-      const meta: TransferMeta = {
+      const fileSha256 = await sha256File(file, (bytes) => {
+        setSenderStatus(`正在计算文件 SHA-256：${formatPercent(file.size ? (bytes / file.size) * 100 : 100)}`);
+      });
+      const meta: SfuTransferMeta = {
         kind: "meta",
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        lastModified: file.lastModified,
+        ...transfer,
+        sha256: fileSha256,
       };
       channel.send(JSON.stringify(meta));
+      setSenderStatus("正在通过 Cloudflare SFU DataChannel 发送文件...");
 
       let offset = 0;
+      let sequence = 0;
       let lastProgressUpdateAt = 0;
       const publishProgress = (bytes: number) => {
         lastProgressUpdateAt = performance.now();
@@ -408,17 +526,25 @@ export function SfuTransferPage() {
       };
 
       while (offset < file.size) {
-        const buffer = await file.slice(offset, offset + chunkSize).arrayBuffer();
+        const buffer = await file.slice(offset, offset + transfer.chunkSize).arrayBuffer();
+        const message = encodeSfuFileChunk(transfer.fileId, sequence, new Uint8Array(buffer));
         await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
-        channel.send(buffer);
+        channel.send(message);
         offset += buffer.byteLength;
+        sequence += 1;
         const now = performance.now();
         if (offset >= file.size || channel.bufferedAmount > highWaterMark || now - lastProgressUpdateAt >= progressUpdateIntervalMs) {
           publishProgress(offset);
         }
       }
 
-      const done: TransferDone = { kind: "done" };
+      if (sequence !== transfer.totalChunks) throw new Error("SFU 文件分块数量与连接码不一致。");
+      const done: SfuTransferDone = {
+        kind: "done",
+        fileId: transfer.fileId,
+        totalChunks: transfer.totalChunks,
+        sha256: fileSha256,
+      };
       await waitForBuffer(channel, { highWaterMark, lowWaterMark, onWait: () => publishProgress(offset) });
       channel.send(JSON.stringify(done));
       setSentBytes(file.size);
@@ -435,16 +561,38 @@ export function SfuTransferPage() {
 
   async function handleReceiverMessage(data: unknown) {
     if (typeof data === "string") {
-      let message: TransferMeta | TransferDone;
+      let message: SfuTransferMeta | SfuTransferDone;
       try {
-        message = JSON.parse(data) as TransferMeta | TransferDone;
+        message = JSON.parse(data) as SfuTransferMeta | SfuTransferDone;
       } catch {
-        return;
+        throw new Error("收到无法识别的 SFU 文件控制消息。");
       }
 
       if (message.kind === "meta") {
-        receiveMetaRef.current = message;
-        receiveChunksRef.current = [];
+        const expected = parsedReceiverCode?.file;
+        const target = receiveTargetRef.current;
+        if (!expected || !target) throw new Error("接收端尚未准备连接码或保存位置。");
+        if (
+          !/^[0-9a-f]{64}$/i.test(message.sha256) ||
+          message.fileId !== expected.fileId ||
+          message.name !== expected.name ||
+          message.size !== expected.size ||
+          message.chunkSize !== expected.chunkSize ||
+          message.totalChunks !== expected.totalChunks
+        ) {
+          throw new Error("发送方文件元数据与连接码不一致。");
+        }
+
+        const previous = receiveStateRef.current;
+        if (previous) await previous.sink.abort();
+        const sink = await openReceiveSink(target, message.type);
+        receiveStateRef.current = {
+          meta: message,
+          sink,
+          hasher: createSha256Hasher(),
+          nextSequence: 0,
+          bytes: 0,
+        };
         receivedBytesRef.current = 0;
         receiveProgressUpdateAtRef.current = 0;
         setIncomingMeta(message);
@@ -455,59 +603,69 @@ export function SfuTransferPage() {
       }
 
       if (message.kind === "done") {
-        const meta = receiveMetaRef.current;
-        if (!meta) {
-          setReceiverError("收到完成信号，但缺少文件元数据。请重新传输。");
-          return;
+        const state = receiveStateRef.current;
+        if (!state) throw new Error("收到完成信号，但缺少文件元数据。");
+        const { meta } = state;
+        if (
+          message.fileId !== meta.fileId ||
+          message.totalChunks !== meta.totalChunks ||
+          message.sha256 !== meta.sha256 ||
+          state.nextSequence !== meta.totalChunks ||
+          state.bytes !== meta.size
+        ) {
+          throw new Error("SFU 文件完成信息与实际接收数据不一致。");
+        }
+        const receivedSha256 = state.hasher.digestHex();
+        if (receivedSha256 !== meta.sha256) {
+          throw new Error(`SHA-256 校验失败：期望 ${meta.sha256}，实际 ${receivedSha256}。`);
         }
 
-        const blob = new Blob(receiveChunksRef.current, {
-          type: meta.type || "application/octet-stream",
-        });
+        const blob = await state.sink.close();
+        const url = blob ? URL.createObjectURL(blob) : null;
         const receivedFile: ReceivedFile = {
-          id: `${Date.now()}-${meta.name}`,
+          id: meta.fileId,
           name: meta.name,
-          size: blob.size,
+          size: state.bytes,
           type: meta.type,
-          url: URL.createObjectURL(blob),
+          url,
+          savedToDisk: state.sink.kind === "file-system",
           receivedAt: new Date().toLocaleString(),
         };
         setReceivedFiles((files) => [receivedFile, ...files]);
         setReceiverProgress(100);
-        setReceivedBytes(blob.size);
-        setReceiverStatus("文件接收完成，已触发浏览器下载。");
-        saveBlob(receivedFile);
+        setReceivedBytes(state.bytes);
+        setReceiverStatus(
+          state.sink.kind === "file-system"
+            ? `文件接收完成，SHA-256 校验通过，已保存到 ${state.sink.name}。`
+            : "文件接收完成，SHA-256 校验通过，已触发浏览器下载。",
+        );
+        if (url) saveBlob({ name: receivedFile.name, url });
         notifyApiUsageChanged();
-        receiveChunksRef.current = [];
-        receiveMetaRef.current = null;
-        setIncomingMeta(null);
+        receiveStateRef.current = null;
+        receiveTargetRef.current = null;
+        return;
       }
-      return;
+      throw new Error("收到不支持的 SFU 文件控制消息。");
     }
 
-    const meta = receiveMetaRef.current;
-    if (!meta) {
-      setReceiverError("收到文件数据，但缺少文件元数据。请重新传输。");
-      return;
-    }
-
+    const state = receiveStateRef.current;
+    if (!state) throw new Error("收到文件数据，但缺少文件元数据。");
     const buffer = data instanceof ArrayBuffer ? data : await (data as Blob).arrayBuffer();
-    receiveChunksRef.current.push(buffer);
-    receivedBytesRef.current += buffer.byteLength;
-    const received = receivedBytesRef.current;
-    const size = meta.size;
-    if (size > 0 && received > size) {
-      setReceivedBytes(received);
-      setReceiverProgress(100);
-      setReceiverError(`接收数据超过声明大小：已接收 ${formatBytes(received)}，文件大小 ${formatBytes(size)}。请重新传输。`);
-      setReceiverStatus("接收数据异常，已停止保存这个文件。");
-      receiveChunksRef.current = [];
-      receiveMetaRef.current = null;
-      receivedBytesRef.current = 0;
-      receiveProgressUpdateAtRef.current = 0;
-      setIncomingMeta(null);
-      return;
+    const chunk = decodeSfuFileChunk(buffer);
+    if (chunk.fileId !== state.meta.fileId) throw new Error("收到其他文件的 SFU 分块。");
+    if (chunk.sequence !== state.nextSequence) {
+      throw new Error(`SFU 文件分块顺序错误：期望 ${state.nextSequence}，实际 ${chunk.sequence}。`);
     }
+    if (chunk.payload.byteLength > state.meta.chunkSize) throw new Error("收到的 SFU 文件分块超过协商大小。");
+    if (state.bytes + chunk.payload.byteLength > state.meta.size) throw new Error("接收数据超过声明的文件大小。");
+
+    await state.sink.write(chunk.payload);
+    state.hasher.update(chunk.payload);
+    state.nextSequence += 1;
+    state.bytes += chunk.payload.byteLength;
+    receivedBytesRef.current = state.bytes;
+    const received = state.bytes;
+    const size = state.meta.size;
 
     const now = performance.now();
     if (size === 0 || received >= size || now - receiveProgressUpdateAtRef.current >= progressUpdateIntervalMs) {
@@ -515,6 +673,14 @@ export function SfuTransferPage() {
       setReceivedBytes(received);
       setReceiverProgress(size ? (received / size) * 100 : 0);
     }
+  }
+
+  async function handleReceiveFailure(error: unknown) {
+    const state = receiveStateRef.current;
+    receiveStateRef.current = null;
+    if (state) await state.sink.abort();
+    setReceiverError(error instanceof Error ? error.message : "接收 SFU 文件失败。");
+    setReceiverStatus("文件接收失败，已停止写入。");
   }
 
   const senderReady = senderChannelState === "open";
@@ -536,6 +702,8 @@ export function SfuTransferPage() {
     { label: "发送通道", value: senderChannelState, icon: Wifi, active: senderReady },
     { label: "接收通道", value: receiverChannelState, icon: Wifi, active: receiverReady },
     { label: "DataChannel", value: dataChannelName || "未注册", icon: FileText },
+    { label: "分块大小", value: formatBytes(senderTransfer?.chunkSize ?? parsedReceiverCode?.file.chunkSize ?? 0), icon: Database },
+    { label: "保存位置", value: receiveTargetLabel || "未选择", icon: HardDrive, active: Boolean(receiveTargetLabel) },
     { label: "选中文件", value: selectedFile ? selectedFile.name : incomingMeta?.name ?? "未选择", icon: HardDrive },
     { label: "文件大小", value: totalBytes ? formatBytes(totalBytes) : "0 B", icon: Database },
     { label: "已发送", value: formatBytes(sentBytes), icon: UploadCloud },
@@ -603,8 +771,10 @@ export function SfuTransferPage() {
                 description="粘贴连接码并订阅 SFU DataChannel"
                 icon={Download}
                 onClick={() => {
+                  closeReceiverSession();
                   setSelectedFile(null);
                   setConnectionCode("");
+                  setParsedReceiverCode(null);
                   setSentBytes(0);
                   setSenderProgress(0);
                   setMode("receive");
@@ -645,11 +815,21 @@ export function SfuTransferPage() {
               <TextArea
                 label="发送方 SFU 连接码"
                 value={receiverCodeInput}
-                onChange={setReceiverCodeInput}
+                onChange={handleReceiverCodeInput}
                 placeholder="把发送方复制出来的 SFU 连接码粘贴到这里"
               />
               <div className="flex flex-wrap gap-3">
-                <PrimaryButton onClick={() => void subscribeToPublisher()} disabled={!receiverCodeInput.trim() || isCreatingSubscriber || receiverReady}>
+                <SecondaryButton onClick={() => void readReceiverCode()} disabled={!receiverCodeInput.trim() || isCreatingSubscriber || receiverReady}>
+                  <FileText aria-hidden="true" size={17} />
+                  读取连接码
+                </SecondaryButton>
+                {fileSystemReceiveSupported && (
+                  <SecondaryButton onClick={() => void chooseReceiveTarget()} disabled={!parsedReceiverCode || isCreatingSubscriber || receiverReady}>
+                    <HardDrive aria-hidden="true" size={17} />
+                    {receiveTargetLabel ? "重新选择保存位置" : "选择保存位置"}
+                  </SecondaryButton>
+                )}
+                <PrimaryButton onClick={() => void subscribeToPublisher()} disabled={!parsedReceiverCode || !receiveTargetLabel || isCreatingSubscriber || receiverReady}>
                   <Link2 aria-hidden="true" size={17} />
                   订阅 DataChannel
                 </PrimaryButton>
@@ -675,7 +855,9 @@ export function SfuTransferPage() {
             }
             subtitle={
               mode === "receive"
-                ? "订阅 DataChannel 后等待发送方传输"
+                ? receiveTargetLabel
+                  ? `保存到 ${receiveTargetLabel}`
+                  : "读取连接码并选择保存位置"
                 : mode === "send"
                   ? selectedFile
                     ? formatBytes(selectedFile.size)
@@ -697,7 +879,11 @@ export function SfuTransferPage() {
           emptyText="接收完成后，文件会出现在这里并自动触发下载。"
           files={receivedFiles}
           formatSize={formatBytes}
-          onDownload={saveBlob}
+          onDownload={(file) => {
+            if (file.url) saveBlob({ name: file.name, url: file.url });
+          }}
+          canDownload={(file) => Boolean(file.url)}
+          getDownloadLabel={(file) => file.savedToDisk ? "已保存" : "下载"}
         />
       </FilesPanel>
     </TransferPageGrid>

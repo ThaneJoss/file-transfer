@@ -194,6 +194,8 @@ export async function installAppMocks(
     candidateTypes?: Array<"host" | "srflx" | "relay">;
     dataChannelState?: RTCDataChannelState;
     dataChannelFailure?: "close" | "error";
+    sctpMaxMessageSize?: number;
+    fileSystemAccess?: boolean;
   } = {},
 ) {
   await page.route(`${apiBaseUrl}/api/auth/get-session`, (route) =>
@@ -222,7 +224,7 @@ export async function installAppMocks(
     }),
   );
 
-  await page.addInitScript(({ candidateTypes, dataChannelState, dataChannelFailure }) => {
+  await page.addInitScript(({ candidateTypes, dataChannelState, dataChannelFailure, sctpMaxMessageSize, fileSystemAccess }) => {
     const selectedTypes = candidateTypes.length ? candidateTypes : ["host", "srflx", "relay"];
     const candidateByType: Record<string, string> = {
       host: "candidate:1 1 udp 2122260223 192.168.0.2 52102 typ host",
@@ -288,6 +290,7 @@ export async function installAppMocks(
       localDescription: RTCSessionDescriptionInit | null = null;
       remoteDescription: RTCSessionDescriptionInit | null = null;
       signalingState: RTCSignalingState = "stable";
+      sctp = { maxMessageSize: sctpMaxMessageSize } as RTCSctpTransport;
 
       constructor(public config: RTCConfiguration = {}) {
         super();
@@ -433,6 +436,9 @@ export async function installAppMocks(
       },
     });
     Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    if (!fileSystemAccess) {
+      Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
+    }
     URL.createObjectURL = () => {
       window.__appTest.objectUrls.created += 1;
       return `blob:test-${window.__appTest.objectUrls.created}`;
@@ -447,6 +453,8 @@ export async function installAppMocks(
     candidateTypes: options.candidateTypes ?? ["host", "srflx", "relay"],
     dataChannelState: options.dataChannelState ?? "open",
     dataChannelFailure: options.dataChannelFailure ?? null,
+    sctpMaxMessageSize: options.sctpMaxMessageSize ?? 64 * 1024,
+    fileSystemAccess: options.fileSystemAccess ?? false,
   });
 }
 
