@@ -8,6 +8,7 @@ import R2Page from "./pages/R2Page";
 import SfuPage from "./pages/SfuPage";
 import STUNPage from "./pages/STUNPage";
 import TURNPage from "./pages/TURNPage";
+import UserPage from "./pages/UserPage";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/turn" element={<ProtectedRoute><TURNPage /></ProtectedRoute>} />
           <Route path="/sfu" element={<ProtectedRoute><SfuPage /></ProtectedRoute>} />
           <Route path="/r2" element={<ProtectedRoute><R2Page /></ProtectedRoute>} />
+          <Route path="/account" element={<ProtectedRoute><UserPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/direct" replace />} />
         </Route>
       </Routes>

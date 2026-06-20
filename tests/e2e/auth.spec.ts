@@ -60,10 +60,25 @@ test.describe("authentication", () => {
     await expect(page).toHaveURL(/\/turn$/);
     await expect(page.getByText("TURN Relay DataChannel")).toBeVisible();
     await expect(page.getByTestId("account-area")).toContainText("测试用户");
-    await expect(page.getByLabel("用量事件")).toContainText("TURN 2 · R2 3 · SFU 4");
+    await expect(page.getByLabel("本月流量")).toContainText("TURN 2.00 MB · SFU 4.00 MB · R2 3.00 MB");
 
     await page.getByLabel("退出登录").click();
     await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("shows the signed-in user's monthly traffic usage", async ({ page }) => {
+    await installAppMocks(page);
+
+    await page.goto("/account");
+
+    await expect(page.getByTestId("user-usage-page")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "用户用量" })).toBeVisible();
+    await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
+    await expect(page.getByText("本月总流量")).toBeVisible();
+    await expect(page.getByText("9.00 MB")).toBeVisible();
+    await expect(page.getByTestId("usage-card-turn")).toContainText("2.00 MB");
+    await expect(page.getByTestId("usage-card-sfu")).toContainText("4.00 MB");
+    await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
   });
 
   test("registers with passkey registration context", async ({ page }) => {

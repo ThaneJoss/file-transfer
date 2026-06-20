@@ -6,9 +6,10 @@ export type R2TemporaryCredentials = R2Credentials & {
   expiresAt: string;
 };
 
-export function requestR2Credentials(fileName: string) {
+export function requestR2Credentials(fileName: string, fileSizeBytes: number) {
   return apiJson<R2TemporaryCredentials>("/v1/r2/credentials", "POST", {
     fileName,
+    fileSizeBytes,
     ttlSeconds: 900,
   });
 }

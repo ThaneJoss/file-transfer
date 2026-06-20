@@ -5,28 +5,58 @@ import { API_UNAUTHORIZED_EVENT, API_USAGE_CHANGED_EVENT, apiRequest } from "../
 import { authClient } from "./client";
 import type { AuthSession } from "./client";
 
-type UsageService = "turn" | "r2" | "sfu";
+export type UsageService = "turn" | "sfu" | "r2";
 
-type UsageRow = {
-  service: UsageService;
-  action: string;
-  events: number;
-  quantity: number;
+export type UsagePeriod = {
+  start: string;
+  end: string;
+  timezone: string;
 };
 
-type UsageCounts = Record<UsageService, number>;
+export type UsageServiceSummary = {
+  bytes: number;
+  quotaBytes: number | null;
+};
+
+export type UsageSnapshot = {
+  period: UsagePeriod | null;
+  services: Record<UsageService, UsageServiceSummary>;
+  totalBytes: number;
+  totalQuotaBytes: number | null;
+};
+
+type UsageApiRow = {
+  service: UsageService;
+  bytes: number;
+  quotaBytes: number | null;
+};
+
+type UsageApiResponse = {
+  period: UsagePeriod;
+  summary: UsageApiRow[];
+  totalBytes: number;
+  totalQuotaBytes: number | null;
+};
 
 type AuthContextValue = {
   session: AuthSession | null;
   isPending: boolean;
   sessionError: string;
-  usage: UsageCounts;
+  usage: UsageSnapshot;
   refreshSession: () => Promise<void>;
   refreshUsage: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
-const emptyUsage: UsageCounts = { turn: 0, r2: 0, sfu: 0 };
+const usageServices = ["turn", "sfu", "r2"] as const satisfies readonly UsageService[];
+
+const emptyUsage: UsageSnapshot = {
+  period: null,
+  services: createEmptyUsageServices(),
+  totalBytes: 0,
+  totalQuotaBytes: null,
+};
+
 const defaultContext: AuthContextValue = {
   session: null,
   isPending: false,
@@ -42,7 +72,7 @@ const AuthContext = createContext<AuthContextValue>(defaultContext);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { data, isPending, error, refetch } = authClient.useSession();
   const [invalidated, setInvalidated] = useState(false);
-  const [usage, setUsage] = useState<UsageCounts>(emptyUsage);
+  const [usage, setUsage] = useState<UsageSnapshot>(emptyUsage);
 
   const refreshSession = useCallback(async () => {
     setInvalidated(false);
@@ -54,10 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUsage(emptyUsage);
       return;
     }
-    const response = await apiRequest<{ summary: UsageRow[] }>("/v1/usage");
-    const next = { ...emptyUsage };
-    for (const row of response.summary) next[row.service] += Number(row.events) || 0;
-    setUsage(next);
+    const response = await apiRequest<UsageApiResponse>("/v1/usage");
+    setUsage(normalizeUsageResponse(response));
   }, [data?.user, invalidated]);
 
   useEffect(() => {
@@ -105,4 +133,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   return useContext(AuthContext);
+}
+
+function createEmptyUsageServices(): Record<UsageService, UsageServiceSummary> {
+  return {
+    turn: { bytes: 0, quotaBytes: null },
+    sfu: { bytes: 0, quotaBytes: null },
+    r2: { bytes: 0, quotaBytes: null },
+  };
+}
+
+function normalizeUsageResponse(response: UsageApiResponse): UsageSnapshot {
+  const services = createEmptyUsageServices();
+  for (const row of response.summary) {
+    if (!usageServices.includes(row.service)) continue;
+    services[row.service] = {
+      bytes: normalizeBytes(row.bytes),
+      quotaBytes: normalizeNullableBytes(row.quotaBytes),
+    };
+  }
+
+  return {
+    period: response.period,
+    services,
+    totalBytes: normalizeBytes(response.totalBytes),
+    totalQuotaBytes: normalizeNullableBytes(response.totalQuotaBytes),
+  };
+}
+
+function normalizeBytes(value: number) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function normalizeNullableBytes(value: number | null | undefined) {
+  if (value == null) return null;
+  return normalizeBytes(value);
 }
