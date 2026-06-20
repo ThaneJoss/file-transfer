@@ -66,13 +66,13 @@ APP_ORIGIN=http://localhost:5173
 
 ## TURN
 
-`/turn` 页面只保留 60 到 86400 秒的 TTL 输入，并通过后端申请临时 `iceServers`：
+`/turn` 页面在生成 TURN Offer 或 TURN Answer 时，会通过后端自动申请临时 `iceServers`：
 
 ```text
 POST /v1/turn/credentials
 ```
 
-拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件。
+拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件，临时 TURN 凭证不会写入连接码。
 
 ## Security
 

@@ -18,7 +18,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 
-import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
+import { PrimaryButton, SecondaryButton, StatusMessage, TextArea } from "../../component/TransferControls";
 import { generateCloudflareTurnIceServers } from "../turn/services/cloudflareTurn";
 import { decodeConnectionPayload, encodeConnectionPayload } from "./protocol/connectionCode";
 import { waitForBuffer, waitForDataChannelOpen } from "./services/dataChannel";
@@ -84,12 +84,6 @@ type CandidateSummary = {
 };
 
 type CandidateType = "host" | "srflx" | "relay";
-type TurnTransport = "udp" | "tcp";
-
-type TurnTransportSummary = Record<TurnTransport, number> & {
-  total: number;
-};
-
 type SelectedCandidatePair = {
   local: string;
   remote: string;
@@ -160,7 +154,6 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
 };
 
 const emptyCandidateSummary: CandidateSummary = { host: 0, srflx: 0, relay: 0, total: 0 };
-const emptyTurnTransportSummary: TurnTransportSummary = { udp: 0, tcp: 0, total: 0 };
 const emptySelectedPair: SelectedCandidatePair = {
   local: "未连接",
   remote: "未连接",
@@ -173,10 +166,9 @@ const lowWaterMark = 4 * 1024 * 1024;
 const progressUpdateIntervalMs = 100;
 const iceGatheringTimeoutMs = 30000;
 const turnIceGatheringTimeoutMs = 90000;
-const turnProbeGatheringTimeoutMs = 15000;
 const channelOpenTimeoutMs = 18000;
 const turnChannelOpenTimeoutMs = 90000;
-const turnTransports: TurnTransport[] = ["udp", "tcp"];
+const defaultTurnCredentialTtlSeconds = 3600;
 
 async function encodeSignal(payload: SignalPayload) {
   return encodeConnectionPayload(payload);
@@ -322,46 +314,6 @@ function hasRequiredCandidate(summary: CandidateSummary, requiredTypes?: Candida
 
 function formatRequiredCandidateTypes(requiredTypes?: CandidateType[]) {
   return requiredTypes?.join("/") ?? "ICE";
-}
-
-function formatIceServerUrls(iceServers: RTCIceServer[]) {
-  const urls = iceServers.flatMap((server) => {
-    if (Array.isArray(server.urls)) return server.urls;
-    return server.urls ? [server.urls] : [];
-  });
-  if (urls.length === 0) return "未配置";
-  return urls.join(", ");
-}
-
-function getTurnUrlTransport(url: string): TurnTransport | null {
-  const lowerUrl = url.toLowerCase();
-  if (lowerUrl.startsWith("turns:")) return "tcp";
-  if (!lowerUrl.startsWith("turn:")) return null;
-  if (lowerUrl.includes("transport=tcp")) return "tcp";
-  if (lowerUrl.includes("transport=udp")) return "udp";
-  return "udp";
-}
-
-function filterIceServersByTurnTransport(iceServers: RTCIceServer[], transport: TurnTransport) {
-  return iceServers.flatMap<RTCIceServer>((server) => {
-    const urls = Array.isArray(server.urls) ? server.urls : server.urls ? [server.urls] : [];
-    const filteredUrls = urls.filter((url) => getTurnUrlTransport(url) === transport);
-    if (filteredUrls.length === 0) return [];
-
-    return [
-      {
-        urls: filteredUrls.length === 1 ? filteredUrls[0] : filteredUrls,
-        username: server.username,
-        credential: server.credential,
-      },
-    ];
-  });
-}
-
-function mergeTurnTransportSummary(summary: TurnTransportSummary, transport: TurnTransport, relayCount: number) {
-  const next = { ...summary, [transport]: relayCount };
-  next.total = next.udp + next.tcp;
-  return next;
 }
 
 function formatRelayServerStatus(
@@ -517,86 +469,6 @@ function waitForIceGathering(
   });
 }
 
-function observeIceProbe({
-  config,
-  requiredTypes,
-  timeoutMs = iceGatheringTimeoutMs,
-  onSummary,
-  onReady,
-  onComplete,
-}: {
-  config: RTCConfiguration;
-  requiredTypes?: CandidateType[];
-  timeoutMs?: number;
-  onSummary: (summary: CandidateSummary) => void;
-  onReady: (summary: CandidateSummary) => void;
-  onComplete: (summary: CandidateSummary) => void;
-}) {
-  return new Promise<void>((resolve, reject) => {
-    const peer = new RTCPeerConnection(config);
-    let ready = false;
-    let finished = false;
-    let timeout: number | undefined;
-    let ice: ReturnType<typeof collectIceCandidates>;
-
-    const finish = (complete = false) => {
-      if (finished) return;
-      finished = true;
-      if (timeout != null) window.clearTimeout(timeout);
-      peer.removeEventListener("icegatheringstatechange", onGatheringChange);
-      ice.stop();
-      const summary = summarizeCandidates(peer.localDescription, ice.candidates);
-      if (complete) onComplete(summary);
-      peer.close();
-    };
-
-    const fail = (error: Error) => {
-      finish(false);
-      reject(error);
-    };
-
-    const publish = () => {
-      const summary = summarizeCandidates(peer.localDescription, ice.candidates);
-      onSummary(summary);
-      if (!ready && hasRequiredCandidate(summary, requiredTypes)) {
-        ready = true;
-        onReady(summary);
-        resolve();
-      }
-      return summary;
-    };
-
-    const onGatheringChange = () => {
-      const summary = publish();
-      if (peer.iceGatheringState === "complete") {
-        if (ready) finish(true);
-        else fail(new Error(`${formatStoredCandidateSummary(summary)}。${formatIceGatheringTimeout(ice.candidates, ice.errors)}`));
-      }
-    };
-
-    ice = collectIceCandidates(peer, publish);
-    peer.addEventListener("icegatheringstatechange", onGatheringChange);
-
-    void (async () => {
-      try {
-        peer.createDataChannel("stun-probe");
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        publish();
-        timeout = window.setTimeout(() => {
-          if (!ready) {
-            const summary = summarizeCandidates(peer.localDescription, ice.candidates);
-            const errorText = formatIceGatheringTimeout(ice.candidates, ice.errors);
-            fail(new Error(`${formatStoredCandidateSummary(summary)}。${errorText}`));
-          }
-        }, timeoutMs);
-      } catch (error) {
-        fail(error instanceof Error ? error : new Error("ICE probe 启动失败。"));
-      }
-    })();
-  });
-}
-
 function getStatsValue(stats: RTCStats, key: string) {
   return (stats as unknown as Record<string, unknown>)[key];
 }
@@ -670,7 +542,6 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const receiveProgressUpdateAtRef = useRef(0);
   const receivedFilesRef = useRef<ReceivedFile[]>([]);
   const sendInFlightRef = useRef(false);
-  const stunProbeInFlightRef = useRef(false);
   const senderFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -703,36 +574,24 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const [transferMode, setTransferMode] = useState<TransferMode>(null);
   const [statusPanelView, setStatusPanelView] = useState<"status" | "details">("status");
   const [senderHandshakeStage, setSenderHandshakeStage] = useState<SenderHandshakeStage>("offer");
-  const [isStunProbing, setIsStunProbing] = useState(false);
-  const [stunProbeStatus, setStunProbeStatus] = useState("等待 probe");
-  const [stunProbeError, setStunProbeError] = useState("");
-  const [stunProbeSummary, setStunProbeSummary] = useState<CandidateSummary>(emptyCandidateSummary);
   const [senderSelectedPair, setSenderSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
   const [receiverSelectedPair, setReceiverSelectedPair] = useState<SelectedCandidatePair>(emptySelectedPair);
-  const [turnTtl, setTurnTtl] = useState("3600");
   const [turnIceServers, setTurnIceServers] = useState<RTCIceServer[]>([]);
-  const [turnTransport, setTurnTransport] = useState<TurnTransport>("udp");
-  const [turnProbeTransportSummary, setTurnProbeTransportSummary] = useState<TurnTransportSummary>(emptyTurnTransportSummary);
-  const [turnCredentialStatus, setTurnCredentialStatus] = useState("等待生成临时 TURN iceServers");
-  const [turnCredentialError, setTurnCredentialError] = useState("");
   const [isGeneratingTurnCredentials, setIsGeneratingTurnCredentials] = useState(false);
 
-  const activeTurnIceServers = useMemo(
-    () => (variant === "turn" ? filterIceServersByTurnTransport(turnIceServers, turnTransport) : []),
-    [turnIceServers, turnTransport, variant],
-  );
   const activeRtcConfig = useMemo<RTCConfiguration>(
     () =>
       variant === "turn"
-        ? { iceServers: activeTurnIceServers, iceTransportPolicy: "relay" }
+        ? { iceServers: turnIceServers, iceTransportPolicy: "relay" }
         : config.rtcConfig,
-    [activeTurnIceServers, config.rtcConfig, variant],
+    [config.rtcConfig, turnIceServers, variant],
   );
-  const serverLabel = variant === "turn" ? formatIceServerUrls(activeTurnIceServers) : config.serverLabel;
-  const hasTurnIceServers = variant !== "turn" || turnIceServers.length > 0;
-  const turnReady =
-    variant !== "turn" ||
-    (activeTurnIceServers.length > 0 && turnProbeTransportSummary[turnTransport] > 0);
+  const serverLabel =
+    variant === "turn"
+      ? turnIceServers.length > 0
+        ? "已准备临时 TURN relay 配置"
+        : "生成 Offer/Answer 时自动申请"
+      : config.serverLabel;
 
   useEffect(() => {
     return () => {
@@ -746,16 +605,10 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     receivedFilesRef.current = receivedFiles;
   }, [receivedFiles]);
 
-  useEffect(() => {
-    if (variant === "stun") {
-      void probeIceServer();
-    }
-  }, []);
-
   const totalBytes = selectedFile?.size ?? incomingMeta?.size ?? 0;
   const progress = Math.max(senderProgress, receiverProgress);
   const combinedCandidateSummary = mergeCandidateSummaries(senderCandidateSummary, receiverCandidateSummary);
-  const combinedServerSummary = mergeCandidateSummaries(stunProbeSummary, combinedCandidateSummary);
+  const combinedServerSummary = combinedCandidateSummary;
   const serverStatus = formatRelayServerStatus(protocolLabel, combinedServerSummary, [
     senderIceGatheringState,
     receiverIceGatheringState,
@@ -768,8 +621,8 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
             label: protocolLabel,
             meta: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes)
               ? `已收集 ${formatRequiredCandidateTypes(config.requiredCandidateTypes)}`
-              : isStunProbing
-                ? "probe 中"
+              : isGeneratingTurnCredentials
+                ? "准备中"
                 : "等待收集",
             icon: Server,
             active: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes),
@@ -831,15 +684,6 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
             active: hasRequiredCandidate(combinedServerSummary, config.requiredCandidateTypes),
           },
           { label: `${protocolLabel}服务器`, value: serverLabel ?? "未配置", icon: Server },
-          ...(variant === "turn"
-            ? [{ label: "TURN模式", value: turnTransport.toUpperCase(), icon: Gauge }]
-            : []),
-          {
-            label: "独立Probe",
-            value: stunProbeError || `${stunProbeStatus}，${formatStoredCandidateSummary(stunProbeSummary)}`,
-            icon: Gauge,
-            active: hasRequiredCandidate(stunProbeSummary, config.requiredCandidateTypes),
-          },
         ]
       : []),
     {
@@ -872,9 +716,9 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     { label: "进度", value: formatPercent(progress), icon: Gauge, progress },
   ];
 
-  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending && turnReady;
+  const senderCanGenerateOffer = Boolean(selectedFile) && !isSending && !isGeneratingTurnCredentials;
   const senderCanApplyAnswer = Boolean(senderAnswerInput.trim() && senderPeerRef.current);
-  const receiverCanCreateAnswer = Boolean(receiverOfferInput.trim()) && turnReady;
+  const receiverCanCreateAnswer = Boolean(receiverOfferInput.trim()) && !isGeneratingTurnCredentials;
 
   const senderOfferSize = useMemo(() => (senderOffer ? `${senderOffer.length.toLocaleString()} 字符` : ""), [senderOffer]);
   const receiverAnswerSize = useMemo(() => (receiverAnswer ? `${receiverAnswer.length.toLocaleString()} 字符` : ""), [receiverAnswer]);
@@ -946,103 +790,19 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
     setReceivedBytes(0);
   }
 
-  async function probeIceServer(nextRtcConfig = activeRtcConfig) {
-    if (!usesIceServer || stunProbeInFlightRef.current) return;
-    if (variant === "turn" && !nextRtcConfig.iceServers?.length) {
-      setStunProbeError("请先生成 Cloudflare TURN iceServers。");
-      return;
-    }
+  async function prepareRtcConfig(role: "sender" | "receiver") {
+    if (variant !== "turn") return activeRtcConfig;
+    if (turnIceServers.length > 0) return activeRtcConfig;
 
+    const setStatus = role === "sender" ? setSenderStatus : setReceiverStatus;
+    setStatus("正在申请临时 TURN relay 配置...");
+    setIsGeneratingTurnCredentials(true);
     try {
-      stunProbeInFlightRef.current = true;
-      setIsStunProbing(true);
-      setStunProbeError("");
-      setStunProbeStatus("步骤1 独立 probe 中");
-      setStunProbeSummary(emptyCandidateSummary);
-      if (variant === "turn") {
-        setTurnProbeTransportSummary(emptyTurnTransportSummary);
-        const readyTransports = new Set<TurnTransport>();
-        await Promise.allSettled(
-          turnTransports.map(async (transport) => {
-            const iceServers = filterIceServersByTurnTransport(nextRtcConfig.iceServers ?? [], transport);
-            if (iceServers.length === 0) return;
-
-            await observeIceProbe({
-              config: { iceServers, iceTransportPolicy: "relay" },
-              requiredTypes: config.requiredCandidateTypes,
-              timeoutMs: turnProbeGatheringTimeoutMs,
-              onSummary: (summary) => {
-                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
-                if (transport === turnTransport) setStunProbeSummary(summary);
-              },
-              onReady: (summary) => {
-                readyTransports.add(transport);
-                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
-                if (transport === turnTransport) setStunProbeSummary(summary);
-                setStunProbeStatus(`步骤1 probe 通过，${transport.toUpperCase()} 已有 relay，继续观察 ICE complete`);
-              },
-              onComplete: (summary) => {
-                setTurnProbeTransportSummary((current) => mergeTurnTransportSummary(current, transport, summary.relay));
-                if (transport === turnTransport) setStunProbeSummary(summary);
-                setStunProbeStatus("步骤1 probe complete");
-              },
-            });
-          }),
-        );
-
-        if (readyTransports.size === 0) {
-          throw new Error("UDP/TCP 都没有返回 relay。");
-        }
-        return;
-      }
-
-      await observeIceProbe({
-        config: nextRtcConfig,
-        requiredTypes: config.requiredCandidateTypes,
-        timeoutMs: iceGatheringTimeoutMs,
-        onSummary: setStunProbeSummary,
-        onReady: (summary) => {
-          setStunProbeSummary(summary);
-          setStunProbeStatus(`步骤1 probe 通过，继续观察 ICE complete，当前 ${formatStoredCandidateSummary(summary)}`);
-        },
-        onComplete: (summary) => {
-          setStunProbeSummary(summary);
-          setStunProbeStatus(`步骤1 probe complete，最终 ${formatStoredCandidateSummary(summary)}`);
-        },
-      });
-    } catch (error) {
-      setStunProbeStatus("步骤1 probe 失败");
-      setStunProbeError(formatStepError(variant, `步骤1 独立 ${protocolLabel} probe 失败`, error, `${protocolLabel} probe 失败。`));
-    } finally {
-      stunProbeInFlightRef.current = false;
-      setIsStunProbing(false);
-    }
-  }
-
-  async function generateTurnCredentials() {
-    if (variant !== "turn") return;
-    const ttl = Number(turnTtl);
-
-    if (!Number.isInteger(ttl) || ttl < 60 || ttl > 86400) {
-      setTurnCredentialError("TTL 请填写 60 到 86400 秒之间的整数。");
-      return;
-    }
-
-    try {
-      setIsGeneratingTurnCredentials(true);
-      setTurnCredentialError("");
-      setTurnCredentialStatus("正在向 Cloudflare 生成临时 TURN iceServers...");
-      setStunProbeSummary(emptyCandidateSummary);
-      setTurnProbeTransportSummary(emptyTurnTransportSummary);
-      setStunProbeError("");
-      const iceServers = await generateCloudflareTurnIceServers(ttl);
+      const iceServers = await generateCloudflareTurnIceServers(defaultTurnCredentialTtlSeconds);
       const nextRtcConfig: RTCConfiguration = { iceServers, iceTransportPolicy: "relay" };
       setTurnIceServers(iceServers);
-      setTurnCredentialStatus(`已生成 ${iceServers.length} 组 TURN iceServers，TTL ${ttl} 秒。`);
-      await probeIceServer(nextRtcConfig);
-    } catch (error) {
-      setTurnCredentialStatus("TURN iceServers 不可用");
-      setTurnCredentialError(error instanceof Error ? error.message : "TURN iceServers 生成或 probe 失败。");
+      setStatus("临时 TURN relay 配置已准备，正在生成信令...");
+      return nextRtcConfig;
     } finally {
       setIsGeneratingTurnCredentials(false);
     }
@@ -1128,13 +888,10 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setSenderError("请先选择一个文件。");
       return;
     }
-    if (!turnReady) {
-      setSenderError("请先生成 Cloudflare TURN iceServers。");
-      return;
-    }
 
     try {
       setSenderError("");
+      const rtcConfig = await prepareRtcConfig("sender");
       setSenderStatus(config.offerGatheringStatus);
       setSenderOffer("");
       setSenderAnswerInput("");
@@ -1144,7 +901,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       closeSenderPeer();
 
       const peer = createPeerConnection(
-        activeRtcConfig,
+        rtcConfig,
         updateSenderPeerState,
         setSenderError,
         usesIceServer ? () => undefined : undefined,
@@ -1243,23 +1000,8 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   }
 
   async function createAnswerFromOffer() {
-    if (!turnReady) {
-      setReceiverError("请先生成 Cloudflare TURN iceServers。");
-      return;
-    }
-
     try {
       setReceiverError("");
-      setReceiverStatus(config.answerGatheringStatus);
-      setReceiverAnswer("");
-      setReceiverCandidateSummary(emptyCandidateSummary);
-      setReceiverProgress(0);
-      setReceivedBytes(0);
-      receiveChunksRef.current = [];
-      receiveMetaRef.current = null;
-      receivedBytesRef.current = 0;
-      closeReceiverPeer();
-
       const payload = await decodeSignal(receiverOfferInput);
       if (payload.role !== "offer" || payload.description.type !== "offer") {
         throw new Error("粘贴的不是 Offer。");
@@ -1270,10 +1012,20 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       if (usesIceServer) {
         assertUsableRemoteCandidates(payload, `发送方 ${config.offerCandidateLabel}`, config.signalCandidateTypes);
       }
+      const rtcConfig = await prepareRtcConfig("receiver");
+      setReceiverStatus(config.answerGatheringStatus);
+      setReceiverAnswer("");
+      setReceiverCandidateSummary(emptyCandidateSummary);
+      setReceiverProgress(0);
+      setReceivedBytes(0);
+      receiveChunksRef.current = [];
+      receiveMetaRef.current = null;
+      receivedBytesRef.current = 0;
+      closeReceiverPeer();
       setSenderCandidateSummary(summarizeCandidates(payload.description, payload.candidates));
 
       const peer = createPeerConnection(
-        activeRtcConfig,
+        rtcConfig,
         updateReceiverPeerState,
         setReceiverError,
         usesIceServer ? () => undefined : undefined,
@@ -1630,82 +1382,6 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
               <h2 className="text-[22px] font-extrabold text-[#061b3a]">选择传输目标</h2>
               <p className="mt-1 text-[15px] text-[#526c92]">先选择当前网页要负责发送还是接收。</p>
             </div>
-
-            {variant === "turn" && (
-              <div className="mb-4 grid min-w-0 gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
-                <div className="inline-card-header">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">临时 TURN 凭证</h3>
-                    <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={turnCredentialError || turnCredentialStatus}>
-                      {turnCredentialError || turnCredentialStatus}
-                    </p>
-                  </div>
-                  <SecondaryButton onClick={() => void generateTurnCredentials()} disabled={isGeneratingTurnCredentials}>
-                    <Server aria-hidden="true" size={17} />
-                    生成
-                  </SecondaryButton>
-                </div>
-                <div className="max-w-[260px]">
-                  <TextInput label="TTL 秒" value={turnTtl} onChange={setTurnTtl} type="number" min={60} max={86400} />
-                </div>
-              </div>
-            )}
-
-            {usesIceServer && (
-              <div className="mb-4 grid min-w-0 gap-3 rounded-xl border border-[#d7e5f6] bg-[#f7fbff] p-3">
-                <div className="inline-card-header">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[15px] font-extrabold text-[#071b3a]">步骤1 {protocolLabel} Probe</h3>
-                    <p className="mt-0.5 truncate text-[13px] text-[#526c92]" title={stunProbeError || stunProbeStatus}>
-                      {stunProbeError || stunProbeStatus}
-                    </p>
-                  </div>
-                  <SecondaryButton onClick={() => void probeIceServer()} disabled={isStunProbing || !hasTurnIceServers}>
-                    <Server aria-hidden="true" size={17} />
-                    Probe
-                  </SecondaryButton>
-                </div>
-                <div className="probe-stat-grid text-[13px]">
-                  {variant === "turn"
-                    ? ([
-                        ["udp", "UDP", turnProbeTransportSummary.udp],
-                        ["tcp", "TCP", turnProbeTransportSummary.tcp],
-                        ["total", "Total", turnProbeTransportSummary.total],
-                      ] as const).map(([key, label, value]) => {
-                        const selectable = key !== "total";
-                        const selected = key === turnTransport;
-                        return (
-                          <button
-                            className={`min-w-0 rounded-lg border px-2 py-2 text-center transition ${
-                              selected
-                                ? "border-[#1677ff] bg-[#eaf4ff] text-[#0d63da] shadow-[0_8px_18px_rgba(47,125,246,0.12)]"
-                                : "border-[#dfeaf7] bg-white text-[#142a4f] hover:border-[#9ec7ff]"
-                            } ${selectable ? "" : "cursor-default hover:border-[#dfeaf7]"}`}
-                            disabled={!selectable}
-                            key={key}
-                            onClick={() => {
-                              if (!selectable || key === turnTransport) return;
-                              setTurnTransport(key);
-                              resetSender();
-                              resetReceiver();
-                              setTransferMode(null);
-                            }}
-                            type="button"
-                          >
-                            <span className="block min-w-0 truncate text-[#6a7f9e]">{label}</span>
-                            <strong className="text-[15px]">{value}</strong>
-                          </button>
-                        );
-                      })
-                    : (["host", "srflx", "relay", "total"] as const).map((key) => (
-                        <span className="min-w-0 rounded-lg border border-[#dfeaf7] bg-white px-2 py-2" key={key}>
-                          <span className="block min-w-0 truncate text-[#6a7f9e]">{key}</span>
-                          <strong className="text-[15px] text-[#142a4f]">{stunProbeSummary[key]}</strong>
-                        </span>
-                      ))}
-                </div>
-              </div>
-            )}
 
             {!transferMode && (
               <div className="grid gap-3">
