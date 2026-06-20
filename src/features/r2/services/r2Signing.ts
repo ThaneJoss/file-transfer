@@ -1,3 +1,5 @@
+import { AwsClient } from "aws4fetch";
+
 export type R2Credentials = {
   accountId: string;
   bucket: string;
@@ -35,14 +37,6 @@ export function r2ObjectUrl(credentials: Pick<R2Credentials, "endpoint" | "bucke
   return `${r2Endpoint(credentials)}${canonicalUri(credentials.bucket.trim(), objectKey)}`;
 }
 
-function getAmzDates(date = new Date()) {
-  const iso = date.toISOString().replace(/[:-]|\.\d{3}/g, "");
-  return {
-    amzDate: iso,
-    dateStamp: iso.slice(0, 8),
-  };
-}
-
 function encodeQueryValue(value: string) {
   return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
@@ -67,37 +61,11 @@ export async function sha256Hex(value: string | ArrayBuffer | Uint8Array) {
   return bytesToHex(await crypto.subtle.digest("SHA-256", arrayBufferFromBytes(bytes)));
 }
 
-async function hmac(key: string | Uint8Array, value: string) {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("R2 签名需要浏览器 Web Crypto，请使用 HTTPS 或 localhost 打开页面。");
-  }
-  const rawKey = typeof key === "string" ? new TextEncoder().encode(key) : key;
-  const cryptoKey = await crypto.subtle.importKey("raw", arrayBufferFromBytes(rawKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, arrayBufferFromBytes(new TextEncoder().encode(value))));
+function amzDate(date = new Date()) {
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, "");
 }
 
-async function getSigningKey(secretAccessKey: string, dateStamp: string) {
-  const dateKey = await hmac(`AWS4${secretAccessKey}`, dateStamp);
-  const regionKey = await hmac(dateKey, region);
-  const serviceKey = await hmac(regionKey, service);
-  return hmac(serviceKey, "aws4_request");
-}
-
-export async function signedR2Request({
-  credentials,
-  method,
-  objectKey,
-  payloadHash,
-  contentType,
-  now,
-}: {
-  credentials: R2Credentials;
-  method: "GET" | "HEAD" | "PUT";
-  objectKey: string;
-  payloadHash: string;
-  contentType?: string;
-  now?: Date;
-}) {
+function assertCompleteCredentials(credentials: R2Credentials) {
   const accountId = credentials.accountId.trim();
   const bucket = credentials.bucket.trim();
   const accessKeyId = credentials.accessKeyId.trim();
@@ -107,46 +75,59 @@ export async function signedR2Request({
     throw new Error("R2 临时凭证不完整，请重新申请。");
   }
 
-  const host = new URL(r2Endpoint(credentials)).host;
-  const { amzDate, dateStamp } = getAmzDates(now);
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const signedHeaders = "host;x-amz-content-sha256;x-amz-date;x-amz-security-token";
-  const canonicalHeaders = [
-    `host:${host}`,
-    `x-amz-content-sha256:${payloadHash}`,
-    `x-amz-date:${amzDate}`,
-    `x-amz-security-token:${sessionToken}`,
-    "",
-  ].join("\n");
-  const canonicalRequest = [
-    method,
-    canonicalUri(bucket, objectKey),
-    "",
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join("\n");
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await getSigningKey(secretAccessKey, dateStamp);
-  const signature = bytesToHex(await hmac(signingKey, stringToSign));
-  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const headers = new Headers({
-    Authorization: authorization,
-    "x-amz-content-sha256": payloadHash,
-    "x-amz-date": amzDate,
-    "x-amz-security-token": sessionToken,
+  return { accountId, bucket, accessKeyId, secretAccessKey, sessionToken };
+}
+
+function r2Client(credentials: R2Credentials) {
+  const { accessKeyId, secretAccessKey, sessionToken } = assertCompleteCredentials(credentials);
+  return new AwsClient({
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    service,
+    region,
+    retries: 0,
   });
-  if (contentType) headers.set("Content-Type", contentType);
+}
+
+export async function signedR2Request({
+  credentials,
+  method,
+  objectKey,
+  payloadHash,
+  contentType,
+  body,
+  now,
+}: {
+  credentials: R2Credentials;
+  method: "GET" | "HEAD" | "PUT";
+  objectKey: string;
+  payloadHash: string;
+  contentType?: string;
+  body?: BodyInit | null;
+  now?: Date;
+}) {
+  const { bucket } = assertCompleteCredentials(credentials);
+  const headers = new Headers({
+    "Content-Type": contentType || "application/octet-stream",
+    "x-amz-content-sha256": payloadHash,
+  });
+  const request = await r2Client(credentials).sign(r2ObjectUrl(credentials, objectKey), {
+    method,
+    headers,
+    body,
+    aws: {
+      allHeaders: true,
+      datetime: now ? amzDate(now) : undefined,
+    },
+  });
 
   return {
-    canonicalRequest,
-    url: `${r2Endpoint(credentials)}${canonicalUri(bucket, objectKey)}`,
-    headers,
+    request,
+    url: request.url,
+    headers: request.headers,
+    signedHeaders: request.headers.get("authorization")?.match(/SignedHeaders=([^,]+)/)?.[1] ?? "",
+    canonicalPath: canonicalUri(bucket, objectKey),
   };
 }
 
@@ -163,56 +144,26 @@ export async function presignedR2Url({
   expiresIn: number;
   now?: Date;
 }) {
-  const accountId = credentials.accountId.trim();
-  const bucket = credentials.bucket.trim();
-  const accessKeyId = credentials.accessKeyId.trim();
-  const secretAccessKey = credentials.secretAccessKey.trim();
-  const sessionToken = credentials.sessionToken.trim();
-  if (!accountId || !bucket || !accessKeyId || !secretAccessKey || !sessionToken || !credentials.endpoint.trim()) {
-    throw new Error("R2 临时凭证不完整，请重新申请。");
-  }
+  assertCompleteCredentials(credentials);
   if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
     throw new Error("预签名下载链接有效期必须是 1 到 604800 秒。");
   }
 
-  const host = new URL(r2Endpoint(credentials)).host;
-  const { amzDate, dateStamp } = getAmzDates(now);
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const payloadHash = "UNSIGNED-PAYLOAD";
-  const query = {
-    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
-    "X-Amz-Content-Sha256": payloadHash,
-    "X-Amz-Credential": `${accessKeyId}/${credentialScope}`,
-    "X-Amz-Date": amzDate,
-    "X-Amz-Expires": String(expiresIn),
-    "X-Amz-Security-Token": sessionToken,
-    "X-Amz-SignedHeaders": "host",
-  };
-  const canonicalRequest = [
+  const url = new URL(r2ObjectUrl(credentials, objectKey));
+  url.searchParams.set("X-Amz-Expires", String(expiresIn));
+  const request = await r2Client(credentials).sign(url, {
     method,
-    canonicalUri(bucket, objectKey),
-    canonicalQueryString(query),
-    `host:${host}\n`,
-    "host",
-    payloadHash,
-  ].join("\n");
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    amzDate,
-    credentialScope,
-    await sha256Hex(canonicalRequest),
-  ].join("\n");
-  const signingKey = await getSigningKey(secretAccessKey, dateStamp);
-  const signature = bytesToHex(await hmac(signingKey, stringToSign));
-  return `${r2Endpoint(credentials)}${canonicalUri(bucket, objectKey)}?${canonicalQueryString({
-    ...query,
-    "X-Amz-Signature": signature,
-  })}`;
+    aws: {
+      datetime: now ? amzDate(now) : undefined,
+      signQuery: true,
+    },
+  });
+  return request.url;
 }
 
 export function formatFetchError(error: unknown) {
   if (error instanceof TypeError) {
-    return "浏览器请求 R2 失败。请检查 bucket CORS 是否允许当前页面 Origin、PUT/GET，以及上传所需的 Authorization、Content-Type、x-amz-date、x-amz-content-sha256。";
+    return "浏览器请求 R2 失败。请检查 bucket CORS 是否允许当前页面 Origin、PUT/GET，以及上传所需的 Authorization、Content-Type、x-amz-date、x-amz-content-sha256、x-amz-security-token。";
   }
   return error instanceof Error ? error.message : "R2 请求失败。";
 }

@@ -1612,7 +1612,7 @@ export function TransferPage({
 
             {transferMode && activeConnected && (
               <div className="grid min-h-[220px] place-items-center rounded-2xl border border-[#b9dcff] bg-[#f1f8ff] px-5 py-5 text-center">
-                <span className="grid size-[56px] place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_14px_30px_rgba(47,125,246,0.24)]">
+                <span className="grid size-[56px] place-items-center rounded-lg bg-[#1677ff] text-white">
                   <Check aria-hidden="true" size={29} />
                 </span>
                 <div>

@@ -31,15 +31,21 @@ describe("R2 SigV4 signing", () => {
       objectKey: "folder/demo.txt",
       payloadHash: await sha256Hex("hello"),
       contentType: "text/plain",
+      body: "hello",
       now: new Date("2026-01-02T03:04:05.000Z"),
     });
 
     expect(result.url).toBe("https://example-account.r2.cloudflarestorage.com/bucket%20name/folder/demo.txt");
+    expect(result.request.method).toBe("PUT");
+    expect(result.headers.get("content-type")).toBe("text/plain");
     expect(result.headers.get("x-amz-date")).toBe("20260102T030405Z");
     expect(result.headers.get("x-amz-security-token")).toBe(credentials.sessionToken);
     expect(result.headers.get("authorization")).toContain("Credential=example-access-key/20260102/auto/s3/aws4_request");
+    expect(result.headers.get("authorization")).toContain("content-type");
+    expect(result.headers.get("authorization")).toContain("x-amz-content-sha256");
     expect(result.headers.get("authorization")).toContain("x-amz-security-token");
     expect(result.headers.get("authorization")).not.toContain(credentials.secretAccessKey);
+    expect(result.signedHeaders).toBe("content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token");
   });
 
   it("creates deterministic presigned URLs without leaking the secret access key", async () => {

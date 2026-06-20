@@ -41,7 +41,7 @@ export function AppShell({
           aria-label="文件中转站首页"
           data-testid="app-brand"
         >
-          <span className="grid size-11 place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(47,125,246,0.34)]">
+          <span className="grid size-11 place-items-center rounded-lg bg-[#1677ff] text-white">
             <Cloud aria-hidden="true" size={26} />
           </span>
           <strong>文件中转站</strong>
@@ -49,7 +49,7 @@ export function AppShell({
 
         <div className="flex min-w-0 justify-end justify-self-end max-[760px]:justify-self-center" data-testid="account-area">
           {session ? (
-            <div className="flex max-w-full min-w-0 items-center gap-2 rounded-2xl border border-white/70 bg-white/75 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)] backdrop-blur">
+            <div className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-3 py-2 text-sm">
               <Link
                 className="grid min-w-0 flex-1 grid-cols-[minmax(86px,auto)_auto] items-center gap-3 rounded-xl px-2 py-1 hover:bg-[#eaf2ff] max-[520px]:grid-cols-1 max-[520px]:gap-1.5"
                 to="/account"
@@ -72,7 +72,7 @@ export function AppShell({
               {accountError && <span className="sr-only" role="alert">{accountError}</span>}
             </div>
           ) : (
-            <Link className="inline-flex items-center gap-2 rounded-xl bg-white/70 px-4 py-3 text-sm font-bold text-[#1476ff]" to="/login">
+            <Link className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-bold text-[#1476ff]" to="/login">
               <LogIn aria-hidden="true" size={18} />
               登录
             </Link>

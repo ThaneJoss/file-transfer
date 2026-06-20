@@ -21,6 +21,7 @@
   "dependencies": {
     "@better-auth/passkey": "1.6.19",
     "@noble/hashes": "2.2.0",
+    "aws4fetch": "^1.0.20",
     "better-auth": "^1.6.19",
     "lucide-react": "^1.18.0",
     "react": "^19.2.7",
