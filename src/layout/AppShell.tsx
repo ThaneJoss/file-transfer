@@ -7,13 +7,16 @@ import { formatBytes, formatPercent } from "../lib/files/format";
 import { useAuth } from "../lib/auth/AuthProvider";
 import type { UsageSnapshot, UsageService } from "../lib/auth/AuthProvider";
 
-const headerUsageRows: Array<{ service: Exclude<UsageService, "durable">; label: string }> = [
-  { service: "direct", label: "Direct" },
-  { service: "stun", label: "STUN" },
-  { service: "turn", label: "TURN" },
-  { service: "sfu", label: "SFU" },
-  { service: "r2", label: "R2" },
+const headerUsageRows: Array<{ service: Exclude<UsageService, "durable">; label: string; color: string }> = [
+  { service: "direct", label: "Direct", color: "#1677ff" },
+  { service: "stun", label: "STUN", color: "#23a26d" },
+  { service: "turn", label: "TURN", color: "#ef8f25" },
+  { service: "sfu", label: "SFU", color: "#7c5cff" },
+  { service: "r2", label: "R2", color: "#0e9fb3" },
 ];
+
+const usageRingRadius = 17;
+const usageRingCircumference = 2 * Math.PI * usageRingRadius;
 
 export function AppShell({
   children,
@@ -29,7 +32,7 @@ export function AppShell({
       data-testid="app-shell"
     >
       <header
-        className="mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(260px,340px)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
+        className="mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(0,auto)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
         data-testid="app-header"
       >
         <Link
@@ -44,11 +47,18 @@ export function AppShell({
           <strong>文件中转站</strong>
         </Link>
 
-        <div className="flex min-w-0 justify-end" data-testid="account-area">
+        <div className="flex min-w-0 justify-end justify-self-end max-[760px]:justify-self-center" data-testid="account-area">
           {session ? (
-            <div className="flex w-full min-w-0 items-start gap-2 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)]">
-              <Link className="min-w-0 flex-1 rounded-lg px-2 py-1 hover:bg-[#eaf2ff]" to="/account" aria-label="用户页面">
-                <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
+            <div className="flex max-w-full min-w-0 items-center gap-2 rounded-2xl border border-white/70 bg-white/75 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)] backdrop-blur">
+              <Link
+                className="grid min-w-0 flex-1 grid-cols-[minmax(86px,auto)_auto] items-center gap-3 rounded-xl px-2 py-1 hover:bg-[#eaf2ff] max-[520px]:grid-cols-1 max-[520px]:gap-1.5"
+                to="/account"
+                aria-label="用户页面"
+              >
+                <div className="min-w-0 text-right max-[520px]:text-center">
+                  <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
+                  <div className="text-[11px] font-semibold text-[#6b7f9f]">本月用量</div>
+                </div>
                 <HeaderUsageBars usage={usage} />
               </Link>
               <button
@@ -79,22 +89,34 @@ export function AppShell({
 
 function HeaderUsageBars({ usage }: { usage: UsageSnapshot }) {
   return (
-    <div className="mt-1 grid gap-0.5" aria-label="本月传输额度" data-testid="header-usage-bars">
+    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2" aria-label="本月传输额度" data-testid="header-usage-bars">
       {headerUsageRows.map((row) => {
         const summary = usage.services[row.service];
         const percent = summary.quota && summary.quota > 0 ? Math.min(100, (summary.usage / summary.quota) * 100) : null;
+        const normalizedPercent = percent === null ? 0 : Math.max(0, Math.min(100, percent));
+        const dash = (normalizedPercent / 100) * usageRingCircumference;
+        const displayValue = percent === null ? "--" : formatPercent(percent);
+        const title = `${row.label}: ${formatBytes(summary.usage)} / ${summary.quota === null ? "未配置" : formatBytes(summary.quota)}`;
+
         return (
-          <div className="grid min-w-0 grid-cols-[42px_minmax(0,1fr)_58px] items-center gap-1.5 text-[10px] leading-3" key={row.service}>
-            <span className="truncate font-bold text-[#526c92]">{row.label}</span>
-            <span className="h-1.5 overflow-hidden rounded-full bg-[#dceafa]">
-              <span
-                className="block h-full rounded-full bg-[#1677ff]"
-                style={{ width: percent === null ? "0%" : formatPercent(percent) }}
-              />
+          <div className="grid w-[46px] shrink-0 justify-items-center gap-1 text-center text-[10px] leading-none" key={row.service} title={title}>
+            <span className="relative grid size-11 place-items-center">
+              <svg className="absolute inset-0 size-11 -rotate-90" viewBox="0 0 44 44" aria-hidden="true">
+                <circle cx="22" cy="22" fill="none" r={usageRingRadius} stroke="#dceafa" strokeWidth="5" />
+                <circle
+                  cx="22"
+                  cy="22"
+                  fill="none"
+                  r={usageRingRadius}
+                  stroke={row.color}
+                  strokeDasharray={`${dash} ${usageRingCircumference - dash}`}
+                  strokeLinecap="round"
+                  strokeWidth="5"
+                />
+              </svg>
+              <span className="relative font-extrabold text-[#071b3a]">{displayValue}</span>
             </span>
-            <span className="truncate text-right font-bold text-[#526c92]" title={`${formatBytes(summary.usage)} / ${summary.quota === null ? "未配置" : formatBytes(summary.quota)}`}>
-              {percent === null ? formatBytes(summary.usage) : formatPercent(percent)}
-            </span>
+            <span className="max-w-full truncate font-extrabold text-[#526c92]">{row.label}</span>
           </div>
         );
       })}
