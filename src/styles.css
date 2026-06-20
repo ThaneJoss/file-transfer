@@ -34,10 +34,7 @@ body {
   min-width: 320px;
   min-height: 100dvh;
   color: #10223b;
-  background:
-    radial-gradient(circle at 12% 12%, rgba(47, 125, 246, 0.12), transparent 28%),
-    radial-gradient(circle at 86% 8%, rgba(29, 200, 95, 0.08), transparent 24%),
-    linear-gradient(180deg, #ffffff 0, #f4f8fd 48%, #eef6ff 100%);
+  background: #f7fbff;
   overflow: hidden;
 }
 
@@ -162,8 +159,8 @@ button {
   min-height: 0;
   place-items: center;
   border: 2px dashed #bdd3f1;
-  border-radius: 1rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 255, 0.78));
+  border-radius: 0.5rem;
+  background: #ffffff;
   padding: clamp(16px, 1.45vw, 22px);
   text-align: center;
 }
@@ -175,7 +172,7 @@ button {
 .file-picker-panel-muted {
   border-style: solid;
   border-color: #d7e5f6;
-  background: linear-gradient(180deg, rgba(247, 251, 255, 0.94), rgba(239, 246, 255, 0.76));
+  background: #f7fbff;
 }
 
 .inline-card-header {
@@ -226,8 +223,8 @@ button {
   justify-content: center;
   margin-top: 0.75rem;
   border: 1px solid #d7e5f6;
-  border-radius: 0.75rem;
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 0.5rem;
+  background: #ffffff;
   padding: 0 0.85rem;
   color: #1677ff;
   font-size: 0.9rem;

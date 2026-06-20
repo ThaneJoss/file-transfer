@@ -115,7 +115,7 @@ export function TransferSteps({ steps }: { steps: TransferStepItem[] }) {
         return (
           <div className="relative z-10 grid min-w-0 justify-items-center text-center max-[620px]:grid-cols-[56px_1fr] max-[620px]:justify-items-start max-[620px]:gap-3 max-[620px]:text-left" key={step.label}>
             <span
-              className={`grid size-[54px] place-items-center rounded-2xl text-white shadow-[0_10px_25px_rgba(47,125,246,0.25)] ${
+              className={`grid size-[54px] place-items-center rounded-lg text-white ${
                 step.active ? "bg-[#1677ff]" : "bg-[#aeb8c8]"
               }`}
             >
@@ -176,7 +176,7 @@ export function ConnectionDetails({
 function MetricCard({ item }: { item: MetricItem }) {
   const Icon = item.icon;
   return (
-    <div className="grid min-h-[62px] min-w-0 grid-cols-[30px_minmax(0,1fr)] items-center gap-2.5 rounded-xl border border-[#dfeaf7] bg-white/65 px-3 py-2.5 text-[13px] shadow-[0_6px_16px_rgba(16,34,59,0.025)]">
+    <div className="grid min-h-[62px] min-w-0 grid-cols-[30px_minmax(0,1fr)] items-center gap-2.5 rounded-lg border border-[#dfeaf7] bg-white px-3 py-2.5 text-[13px]">
       <span className="grid size-[30px] place-items-center rounded-lg bg-[#eef6ff] text-[#1677ff]">
         <Icon aria-hidden="true" size={16} />
       </span>
@@ -218,8 +218,8 @@ export function RoleOption({
 }) {
   return (
     <button
-      className={`grid min-h-[68px] grid-cols-[22px_34px_minmax(0,1fr)] items-center gap-3 rounded-xl border px-3 text-left transition hover:-translate-y-px hover:border-[#1677ff] hover:bg-white ${
-        selected ? "border-[#9ec7ff] bg-[#f2f8ff] shadow-[0_8px_22px_rgba(47,125,246,0.10)]" : "border-[#d7e5f6] bg-white/80"
+      className={`grid min-h-[68px] grid-cols-[22px_34px_minmax(0,1fr)] items-center gap-3 rounded-lg border px-3 text-left hover:border-[#1677ff] hover:bg-white ${
+        selected ? "border-[#9ec7ff] bg-[#f2f8ff]" : "border-[#d7e5f6] bg-white"
       }`}
       type="button"
       onClick={onClick}
@@ -272,7 +272,7 @@ export function FilePickerPanel({
       data-testid="file-upload-dropzone"
     >
       <input ref={inputRef} className="hidden" type="file" onChange={onFileInput} disabled={disabled} />
-      <div className={`mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-3xl text-white shadow-[0_16px_32px_rgba(47,125,246,0.28)] max-[1180px]:size-[82px] ${
+      <div className={`mb-4 grid size-[clamp(64px,7.5dvh,82px)] place-items-center rounded-lg text-white max-[1180px]:size-[82px] ${
         disabled ? "bg-[#8da1bc]" : "bg-[#1677ff]"
       }`}>
         <Icon aria-hidden="true" size={46} />
@@ -328,7 +328,7 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
 
       <div className={`grid min-h-0 gap-3 ${files.length > 0 ? "overflow-auto pr-1" : "overflow-hidden"}`} role="table" aria-label={ariaLabel}>
         {files.length === 0 ? (
-          <div className="grid min-h-[108px] place-items-center rounded-xl border border-dashed border-[#c7daf2] bg-white/70 text-[15px] text-[#607a9f]">
+          <div className="grid min-h-[108px] place-items-center rounded-lg border border-dashed border-[#c7daf2] bg-white text-[15px] text-[#607a9f]">
             {emptyText}
           </div>
         ) : (
@@ -336,12 +336,12 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
             const downloadAvailable = canDownload?.(file) ?? true;
             return (
               <article
-              className="grid min-h-[72px] grid-cols-[minmax(180px,1.8fr)_minmax(92px,0.55fr)_minmax(170px,0.9fr)_minmax(124px,0.5fr)] items-center gap-4 rounded-xl border border-[#e0eaf7] bg-white px-4 text-[15px] text-[#355176] shadow-[0_8px_22px_rgba(16,34,59,0.035)] max-[900px]:grid-cols-1 max-[900px]:gap-2.5 max-[900px]:p-4"
+              className="grid min-h-[72px] grid-cols-[minmax(180px,1.8fr)_minmax(92px,0.55fr)_minmax(170px,0.9fr)_minmax(124px,0.5fr)] items-center gap-4 rounded-lg border border-[#e0eaf7] bg-white px-4 text-[15px] text-[#355176] max-[900px]:grid-cols-1 max-[900px]:gap-2.5 max-[900px]:p-4"
               key={file.id}
               role="row"
             >
               <div className="flex min-w-0 items-center gap-3 text-[#071b3a]" role="cell">
-                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#20c263] text-white shadow-sm">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#20c263] text-white">
                   <FileText aria-hidden="true" size={17} />
                 </span>
                 <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[16px] font-extrabold">{file.name}</strong>
@@ -349,7 +349,7 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
               <span role="cell">{formatSize(file.size)}</span>
               <time role="cell">{file.receivedAt}</time>
               <button
-                className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[15px] font-extrabold text-[#1677ff] transition hover:border-[#9ec7ff] disabled:cursor-default disabled:text-[#7489a6] disabled:hover:border-[#d7e5f6]"
+                className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[15px] font-extrabold text-[#1677ff] hover:border-[#9ec7ff] disabled:cursor-default disabled:text-[#7489a6] disabled:hover:border-[#d7e5f6]"
                 type="button"
                 disabled={!downloadAvailable}
                 onClick={() => onDownload(file)}

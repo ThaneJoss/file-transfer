@@ -11,7 +11,7 @@ export function Panel({
 }) {
   return (
     <section
-      className={`min-w-0 rounded-2xl border border-white/70 bg-white/90 shadow-[0_18px_55px_rgba(23,54,97,0.10)] ring-1 ring-[#d9e7f8]/70 backdrop-blur ${className}`}
+      className={`min-w-0 rounded-lg border border-[#d7e5f6] bg-white ${className}`}
       data-testid={testId}
     >
       {children}

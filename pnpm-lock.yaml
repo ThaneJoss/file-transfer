@@ -14,6 +14,9 @@ importers:
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0
+      aws4fetch:
+        specifier: ^1.0.20
+        version: 1.0.20
       better-auth:
         specifier: ^1.6.19
         version: 1.6.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.9)
@@ -757,6 +760,9 @@ packages:
 
   ast-v8-to-istanbul@1.0.4:
     resolution: {integrity: sha512-0bC0/4bTSrnwdhU3IsZDwEdojvuPrSg59OYZfKsLRtJZ0u8VBx9DebfqqG8bRdCC0I7vjgxmPi41P0lpkhJHtA==}
+
+  aws4fetch@1.0.20:
+    resolution: {integrity: sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g==}
 
   better-auth@1.6.19:
     resolution: {integrity: sha512-68eXWKj0sxa0xW4+n4tENd6Co94UCynPKe1fncmO6kIB3XhSXWgwDEpiUouJV2dmLBrHM1FPkoI6Q5597zCGpQ==}
@@ -2154,6 +2160,8 @@ snapshots:
       '@jridgewell/trace-mapping': 0.3.31
       estree-walker: 3.0.3
       js-tokens: 10.0.0
+
+  aws4fetch@1.0.20: {}
 
   better-auth@1.6.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.9):
     dependencies:

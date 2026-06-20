@@ -266,14 +266,11 @@ export function R2TransferPage({
         objectKey: key,
         payloadHash,
         contentType: selectedFile.type || "application/octet-stream",
+        body: buffer,
       });
 
       setSenderStatus("正在上传到 Cloudflare R2...");
-      const response = await fetch(signed.url, {
-        method: "PUT",
-        headers: signed.headers,
-        body: buffer,
-      });
+      const response = await fetch(signed.request);
       if (!response.ok) {
         const text = await response.text().catch(() => "");
         throw new Error(`R2 上传失败：HTTP ${response.status}${text ? `，${text.slice(0, 180)}` : ""}`);

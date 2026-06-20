@@ -109,9 +109,9 @@ function TransferMethodSelector({
               key={method.id}
               type="button"
               onClick={() => onChange(method.id)}
-              className={`min-w-0 rounded-lg border px-2 py-2 text-left transition ${
+              className={`min-w-0 rounded-lg border px-2 py-2 text-left ${
                 active
-                  ? "border-[#1677ff] bg-[#1677ff] text-white shadow-[0_8px_18px_rgba(47,125,246,0.18)]"
+                  ? "border-[#1677ff] bg-[#1677ff] text-white"
                   : "border-[#d7e5f6] bg-white text-[#355176] hover:border-[#9ec7ff]"
               }`}
               aria-pressed={active}

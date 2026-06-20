@@ -15,12 +15,12 @@ export default function LoginPage() {
           to="/"
           aria-label="返回文件中转站"
         >
-          <span className="grid size-11 place-items-center rounded-2xl bg-[#1677ff] text-white shadow-[0_12px_28px_rgba(47,125,246,0.34)]">
+          <span className="grid size-11 place-items-center rounded-lg bg-[#1677ff] text-white">
             <Cloud aria-hidden="true" size={26} />
           </span>
           <strong>文件中转站</strong>
         </Link>
-        <Link className="rounded-xl bg-white/70 px-4 py-3 text-sm font-bold text-[#1476ff]" to="/">
+        <Link className="rounded-lg bg-white px-4 py-3 text-sm font-bold text-[#1476ff]" to="/">
           返回首页
         </Link>
       </header>
