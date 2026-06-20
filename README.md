@@ -78,6 +78,8 @@ POST /v1/turn/credentials
 
 TURN、R2、SFU 长期密钥只存在后端。R2 临时凭证仅保存在发送方页面内存中，PUT 直接上传到 R2；连接码只携带服务端生成的对象 Key、文件信息、预签名下载 URL 和过期时间。SFU 控制请求统一经过 `/v1/sfu`，前端不接触 App Token。
 
+SFU 文件传输使用 v2 连接码和应用层流式协议：发送端根据 `RTCSctpTransport.maxMessageSize` 动态分块，每个二进制块携带文件 ID 与序号，接收端按顺序写入并校验增量 SHA-256。支持 File System Access API 的浏览器会直接写入用户选择的文件；其他浏览器仅对不超过 128 MB 的文件使用内存 Blob 回退。
+
 ## Dependency Audit
 
 现代库和自实现能力审计见 [`docs/dependency-audit.md`](docs/dependency-audit.md)。

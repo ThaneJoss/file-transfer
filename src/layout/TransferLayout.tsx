@@ -304,6 +304,8 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
   files,
   formatSize,
   onDownload,
+  canDownload,
+  getDownloadLabel,
 }: {
   title: string;
   countLabel: string;
@@ -312,6 +314,8 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
   files: TFile[];
   formatSize: (bytes: number) => string;
   onDownload: (file: TFile) => void;
+  canDownload?: (file: TFile) => boolean;
+  getDownloadLabel?: (file: TFile) => string;
 }) {
   return (
     <>
@@ -328,8 +332,10 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
             {emptyText}
           </div>
         ) : (
-          files.map((file) => (
-            <article
+          files.map((file) => {
+            const downloadAvailable = canDownload?.(file) ?? true;
+            return (
+              <article
               className="grid min-h-[72px] grid-cols-[minmax(180px,1.8fr)_minmax(92px,0.55fr)_minmax(170px,0.9fr)_minmax(124px,0.5fr)] items-center gap-4 rounded-xl border border-[#e0eaf7] bg-white px-4 text-[15px] text-[#355176] shadow-[0_8px_22px_rgba(16,34,59,0.035)] max-[900px]:grid-cols-1 max-[900px]:gap-2.5 max-[900px]:p-4"
               key={file.id}
               role="row"
@@ -343,15 +349,17 @@ export function ReceivedFilesPanel<TFile extends TransferFileItem>({
               <span role="cell">{formatSize(file.size)}</span>
               <time role="cell">{file.receivedAt}</time>
               <button
-                className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[15px] font-extrabold text-[#1677ff] transition hover:border-[#9ec7ff]"
+                className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[15px] font-extrabold text-[#1677ff] transition hover:border-[#9ec7ff] disabled:cursor-default disabled:text-[#7489a6] disabled:hover:border-[#d7e5f6]"
                 type="button"
+                disabled={!downloadAvailable}
                 onClick={() => onDownload(file)}
               >
                 <Download aria-hidden="true" size={17} />
-                下载
+                {getDownloadLabel?.(file) ?? "下载"}
               </button>
-            </article>
-          ))
+              </article>
+            );
+          })
         )}
       </div>
     </>

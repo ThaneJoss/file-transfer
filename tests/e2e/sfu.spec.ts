@@ -11,6 +11,11 @@ import {
   selectFile,
   withoutExpectedNetworkDiagnostics,
 } from "./support/app";
+import {
+  encodeSfuFileChunk,
+  sfuFileProtocolKind,
+  sha256File,
+} from "../../src/features/sfu/services/fileTransfer";
 
 async function mockSfuSuccess(page: Page) {
   let sessionCount = 0;
@@ -77,24 +82,111 @@ test.describe("SFU page", () => {
     await page.waitForFunction(() => window.__appTest.rtc.closedPeers > 0);
   });
 
+  test("streams a large file in messages below the negotiated SCTP limit", async ({ page }) => {
+    await mockSfuSuccess(page);
+    await openRoute(page, "sfu");
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    const fileBytes = Buffer.alloc(100 * 1024, 0x5a);
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "sfu-large.bin",
+      mimeType: "application/octet-stream",
+      buffer: fileBytes,
+    });
+    await page.getByRole("button", { name: /创建发布通道/ }).click();
+    await expect(page.getByLabel(/发送方 SFU 连接码/)).not.toHaveValue("");
+
+    const code = await decodeConnectionCodePayload(page, await page.getByLabel(/发送方 SFU 连接码/).inputValue());
+    expect(code.kind).toBe(sfuFileProtocolKind);
+    expect(code.file).toMatchObject({ name: "sfu-large.bin", size: fileBytes.byteLength, totalChunks: 2 });
+    expect((code.file as { chunkSize: number }).chunkSize).toBeLessThan(64 * 1024);
+
+    await page.getByRole("button", { name: /发送文件/ }).click();
+    await page.waitForFunction(() =>
+      window.__appTest.rtc.sentPayloads.some((payload) => payload.kind === "text" && payload.value.includes('"kind":"done"')),
+    );
+    const payloads = await page.evaluate(() => window.__appTest.rtc.sentPayloads);
+    const binaryPayloads = payloads.filter((payload) => payload.kind === "arrayBuffer");
+    expect(binaryPayloads).toHaveLength(2);
+    expect(binaryPayloads.every((payload) => payload.byteLength <= 64 * 1024)).toBe(true);
+    const controlPayloads = payloads
+      .filter((payload): payload is { kind: "text"; value: string } => payload.kind === "text")
+      .map((payload) => JSON.parse(payload.value) as Record<string, unknown>);
+    expect(controlPayloads.find((payload) => payload.kind === "meta")?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(controlPayloads.find((payload) => payload.kind === "done")?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    await expect(page.getByText("文件已发送完成。")).toBeVisible();
+  });
+
   test("creates a mocked subscriber and rejects malformed connection codes", async ({ page }) => {
     await mockSfuSuccess(page);
     await openRoute(page, "sfu");
     await page.getByRole("button", { name: /接收文件/ }).click();
     await page.getByLabel("发送方 SFU 连接码").fill("not-json");
-    await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
+    await page.getByRole("button", { name: /读取连接码/ }).click();
     await expect(page.getByRole("alert")).toContainText(/Unexpected token|SFU 连接码格式不正确/);
 
     const code = {
-      kind: "cloudflare-sfu-file-v1",
+      kind: sfuFileProtocolKind,
       publisherSessionId: "publisher-session",
       dataChannelName: "file-test",
-      file: { name: "demo.txt", size: 5, type: "text/plain", lastModified: 1 },
+      file: {
+        fileId: "12345678-1234-4234-9234-1234567890ab",
+        name: "demo.txt",
+        size: 5,
+        type: "text/plain",
+        lastModified: 1,
+        chunkSize: 16,
+        totalChunks: 1,
+      },
       createdAt: Date.now(),
     };
     await page.getByLabel("发送方 SFU 连接码").fill(JSON.stringify(code));
+    await page.getByRole("button", { name: /读取连接码/ }).click();
     await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
     await expect(page.getByText(/已订阅 SFU DataChannel/)).toBeVisible();
+  });
+
+  test("verifies ordered chunks and downloads the memory fallback after SHA-256 passes", async ({ page }) => {
+    await mockSfuSuccess(page);
+    await openRoute(page, "sfu");
+    await page.getByRole("button", { name: /接收文件/ }).click();
+    const fileId = "12345678-1234-4234-9234-1234567890ab";
+    const payload = new TextEncoder().encode("hello");
+    const fileSha256 = await sha256File(new Blob([payload]));
+    const file = {
+      fileId,
+      name: "verified.txt",
+      size: payload.byteLength,
+      type: "text/plain",
+      lastModified: 1,
+      chunkSize: 16,
+      totalChunks: 1,
+    };
+    await page.getByLabel("发送方 SFU 连接码").fill(JSON.stringify({
+      kind: sfuFileProtocolKind,
+      publisherSessionId: "publisher-session",
+      dataChannelName: "file-test",
+      file,
+      createdAt: Date.now(),
+    }));
+    await page.getByRole("button", { name: /读取连接码/ }).click();
+    await page.getByRole("button", { name: /订阅 DataChannel/ }).click();
+    await expect(page.getByText(/已订阅 SFU DataChannel/)).toBeVisible();
+
+    const chunk = Array.from(new Uint8Array(encodeSfuFileChunk(fileId, 0, payload)));
+    await page.evaluate(({ meta, binary, done }) => {
+      const channel = window.__appTest.rtc.channels.at(-1);
+      channel?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(meta) }));
+      channel?.dispatchEvent(new MessageEvent("message", { data: new Uint8Array(binary).buffer }));
+      channel?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(done) }));
+    }, {
+      meta: { kind: "meta", ...file, sha256: fileSha256 },
+      binary: chunk,
+      done: { kind: "done", fileId, totalChunks: 1, sha256: fileSha256 },
+    });
+
+    await expect(page.getByText(/SHA-256 校验通过/)).toBeVisible();
+    await expect(page.getByTestId("file-list-panel").getByText("verified.txt")).toBeVisible();
+    await expect(page.evaluate(() => window.__appTest.downloads)).resolves.toBe(1);
   });
 
   for (const status of [403, 429, 500]) {
