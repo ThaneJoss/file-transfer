@@ -214,15 +214,60 @@ export async function installAppMocks(
           timezone: "UTC",
         },
         summary: [
-          { service: "turn", bytes: 2 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
-          { service: "sfu", bytes: 4 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
-          { service: "r2", bytes: 3 * 1024 * 1024, quotaBytes: 10 * 1024 * 1024 },
+          { service: "direct", unit: "bytes", usage: 1 * 1024 * 1024, quota: 10 * 1024 * 1024 },
+          { service: "stun", unit: "bytes", usage: 5 * 1024 * 1024, quota: 10 * 1024 * 1024 },
+          { service: "turn", unit: "bytes", usage: 2 * 1024 * 1024, quota: 10 * 1024 * 1024 },
+          { service: "sfu", unit: "bytes", usage: 4 * 1024 * 1024, quota: 10 * 1024 * 1024 },
+          { service: "r2", unit: "bytes", usage: 3 * 1024 * 1024, quota: 10 * 1024 * 1024 },
+          { service: "durable", unit: "requests", usage: 7, quota: 100 },
         ],
-        totalBytes: 9 * 1024 * 1024,
-        totalQuotaBytes: 30 * 1024 * 1024,
+        totals: { bytes: 15 * 1024 * 1024, requests: 7 },
+        quotas: { bytes: 50 * 1024 * 1024, requests: 100 },
+        totalBytes: 15 * 1024 * 1024,
+        totalQuotaBytes: 50 * 1024 * 1024,
       }),
     }),
   );
+  await page.route(`${apiBaseUrl}/v1/pickups`, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ code: "12345678", expiresAt: Date.now() + 3600_000 }),
+    });
+  });
+  await page.route(`${apiBaseUrl}/v1/pickups/*`, async (route) => {
+    const request = route.request();
+    const isAnswer = new URL(request.url()).pathname.endsWith("/answer");
+    if (isAnswer && request.method() === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: null }) });
+      return;
+    }
+    if (isAnswer && request.method() === "PUT") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+      return;
+    }
+    const variant = page.url().includes("/stun") ? "stun" : "direct";
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "found",
+        variant,
+        offer: rawSignalText({
+          kind: `${variant}-webrtc-signal`,
+          role: "offer",
+          descriptionType: "offer",
+          candidateTypes: variant === "stun" ? ["srflx"] : ["host"],
+        }),
+        expiresAt: Date.now() + 3600_000,
+        answered: false,
+      }),
+    });
+  });
+  await page.route(`${apiBaseUrl}/v1/usage/transfers`, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ recorded: true }) });
+  });
 
   await page.addInitScript(({ candidateTypes, dataChannelState, dataChannelFailure, sctpMaxMessageSize, fileSystemAccess }) => {
     const selectedTypes = candidateTypes.length ? candidateTypes : ["host", "srflx", "relay"];

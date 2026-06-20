@@ -75,10 +75,13 @@ test.describe("authentication", () => {
     await expect(page.getByRole("heading", { name: "用户用量" })).toBeVisible();
     await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
     await expect(page.getByText("本月总流量")).toBeVisible();
-    await expect(page.getByText("9.00 MB")).toBeVisible();
+    await expect(page.getByText("15.00 MB")).toBeVisible();
+    await expect(page.getByTestId("usage-card-direct")).toContainText("1.00 MB");
+    await expect(page.getByTestId("usage-card-stun")).toContainText("5.00 MB");
     await expect(page.getByTestId("usage-card-turn")).toContainText("2.00 MB");
     await expect(page.getByTestId("usage-card-sfu")).toContainText("4.00 MB");
     await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
+    await expect(page.getByTestId("usage-card-durable")).toContainText("7 次");
   });
 
   test("refreshes usage when entering the account page and clicking refresh", async ({ page }) => {
