@@ -16,7 +16,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, ReactNode } from "react";
 
 import { PrimaryButton, SecondaryButton, StatusMessage, TextArea, TextInput } from "../../component/TransferControls";
 import { generateCloudflareTurnIceServers } from "../turn/services/cloudflareTurn";
@@ -49,6 +49,7 @@ import {
   recordTransferUsage,
   submitPickupAnswer,
 } from "./services/pickupApi";
+import type { PendingPickup, PickupVariant } from "./services/pickupApi";
 
 type SignalPayload = {
   kind: SignalKind;
@@ -83,7 +84,7 @@ type ReceivedFile = {
 
 type TransferMode = "send" | "receive" | null;
 type SenderHandshakeStage = "offer" | "answer";
-type TransferVariant = "direct" | "stun" | "turn";
+export type WebRtcTransferVariant = "direct" | "stun" | "turn";
 
 type CandidateSummary = {
   host: number;
@@ -116,7 +117,7 @@ type TransferVariantConfig = {
   signalCandidateTypes: CandidateType[];
 };
 
-const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
+const transferVariantConfig: Record<WebRtcTransferVariant, TransferVariantConfig> = {
   direct: {
     connectionType: "Direct DataChannel",
     description: "手动复制 Offer / Answer，文件走 DataChannel 点对点传输。",
@@ -142,8 +143,7 @@ const transferVariantConfig: Record<TransferVariant, TransferVariantConfig> = {
     offerCandidateLabel: "STUN Offer",
     answerCandidateLabel: "STUN Answer",
     serverLabel: "stun.cloudflare.com:3478",
-    requiredCandidateTypes: ["srflx"],
-    signalCandidateTypes: ["srflx", "relay"],
+    signalCandidateTypes: ["host", "srflx", "relay"],
   },
   turn: {
     connectionType: "TURN Relay DataChannel",
@@ -343,7 +343,7 @@ function formatSelectedPair(pair: SelectedCandidatePair) {
   return `${pair.local} -> ${pair.remote}`;
 }
 
-function formatStepError(variant: TransferVariant, step: string, error: unknown, fallback: string) {
+function formatStepError(variant: WebRtcTransferVariant, step: string, error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   return variant === "direct" ? message : `${step}：${message}`;
 }
@@ -451,6 +451,10 @@ function hasCandidateType(candidates: RTCIceCandidateInit[], types?: CandidateTy
   return candidates.some((candidate) => candidate.candidate && isCandidateType(candidate.candidate, types));
 }
 
+function isWebRtcPickupVariant(variant: PickupVariant): variant is WebRtcTransferVariant {
+  return variant === "direct" || variant === "stun" || variant === "turn";
+}
+
 function waitForIceGathering(
   peer: RTCPeerConnection,
   collection?: { candidates: RTCIceCandidateInit[]; errors: string[] },
@@ -536,7 +540,17 @@ async function getSelectedCandidatePair(peer: RTCPeerConnection): Promise<Select
   };
 }
 
-export function TransferPage({ variant }: { variant: TransferVariant }) {
+export function TransferPage({
+  variant,
+  methodSelector,
+  pendingPickup,
+  onPickupVariantResolved,
+}: {
+  variant: WebRtcTransferVariant;
+  methodSelector?: ReactNode;
+  pendingPickup?: PendingPickup | null;
+  onPickupVariantResolved?: (pending: PendingPickup) => void;
+}) {
   const { session } = useAuth();
   const config = transferVariantConfig[variant];
   const protocolLabel = variant === "direct" ? "Direct" : variant.toUpperCase();
@@ -596,7 +610,8 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   const [receiverPickupCode, setReceiverPickupCode] = useState("");
   const [pickupExpiresAt, setPickupExpiresAt] = useState<number | null>(null);
   const [isPickupBusy, setIsPickupBusy] = useState(false);
-  const pickupEnabled = Boolean(session?.user) && (variant === "direct" || variant === "stun");
+  const pickupEnabled = Boolean(session?.user);
+  const consumedPendingPickupRef = useRef("");
 
   const activeRtcConfig = useMemo<RTCConfiguration>(
     () =>
@@ -919,7 +934,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
   }
 
   async function publishPickupOffer(encoded: string) {
-    if (!pickupEnabled || (variant !== "direct" && variant !== "stun")) return false;
+    if (!pickupEnabled) return false;
     setSenderStatus("Offer 已生成，正在写入 Durable Object...");
     const pickup = await createPickup(variant, encoded);
     setSenderPickupCode(pickup.code);
@@ -992,6 +1007,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       await peer.setLocalDescription(offer);
       if (variant === "turn") {
         let signalVersion = 0;
+        let pickupPublished = false;
         const publishOfferSnapshot = async () => {
           const description = peer.localDescription;
           if (!description) return;
@@ -1024,10 +1040,22 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
 
           setSenderOffer(encoded);
           setSenderHandshakeStage("offer");
+          if (pickupEnabled && !pickupPublished) {
+            pickupPublished = true;
+            try {
+              await publishPickupOffer(encoded);
+            } catch (error) {
+              pickupPublished = false;
+              setSenderError(formatStepError(variant, `步骤2 写入 ${config.offerCandidateLabel} 取件码失败`, error, "写入取件码失败。"));
+            }
+            return;
+          }
           setSenderStatus(
-            peer.iceGatheringState === "complete"
-              ? `步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`
-              : `步骤2 ${config.offerCandidateLabel} 已更新，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。可复制，后续 relay 到达会继续刷新。`,
+            pickupEnabled
+              ? `取件码 ${senderPickupCode || "已生成"} 已更新为可连接的 TURN Offer，等待接收方输入。`
+              : peer.iceGatheringState === "complete"
+                ? `步骤2 完整 ${config.offerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给接收方。`
+                : `步骤2 ${config.offerCandidateLabel} 已更新，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。可复制，后续 relay 到达会继续刷新。`,
           );
         };
         const onGatheringChange = () => {
@@ -1125,6 +1153,7 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       await peer.setLocalDescription(answer);
       if (variant === "turn") {
         let signalVersion = 0;
+        let pickupAnswerSubmitted = false;
         const publishAnswerSnapshot = async () => {
           const description = peer.localDescription;
           if (!description) return;
@@ -1156,6 +1185,17 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
           if (version !== signalVersion || receiverPeerRef.current !== peer) return;
 
           setReceiverAnswer(encoded);
+          if (pickupCodeOverride && !pickupAnswerSubmitted) {
+            pickupAnswerSubmitted = true;
+            try {
+              await submitPickupAnswer(pickupCodeOverride, encoded);
+              setReceiverStatus("Answer 已写入取件码，等待发送方建立 DataChannel。");
+            } catch (error) {
+              pickupAnswerSubmitted = false;
+              setReceiverError(formatStepError(variant, `步骤2 写入 ${config.answerCandidateLabel} 失败`, error, "写入 Answer 失败。"));
+            }
+            return;
+          }
           setReceiverStatus(
             peer.iceGatheringState === "complete"
               ? `步骤2 完整 ${config.answerCandidateLabel} 已生成，信令候选：${formatStoredCandidateSummary(signalParts.summary)}。复制给发送方。`
@@ -1218,14 +1258,15 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setReceiverError("取件码必须是 8 位数字。");
       return;
     }
-    if (variant !== "direct" && variant !== "stun") return;
     try {
       setIsPickupBusy(true);
       setReceiverError("");
       setReceiverStatus("正在读取取件码...");
       const pickup = await getPickup(code);
       if (pickup.variant !== variant) {
-        throw new Error(`该取件码属于 ${pickup.variant.toUpperCase()}，请打开对应页面。`);
+        onPickupVariantResolved?.({ code, pickup });
+        setReceiverStatus(`取件码属于 ${pickup.variant.toUpperCase()}，正在切换传输方法。`);
+        return;
       }
       setReceiverPickupCode(code);
       setReceiverOfferInput(pickup.offer);
@@ -1236,6 +1277,23 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
       setIsPickupBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!pendingPickup || pendingPickup.pickup.variant !== variant) return;
+    if (!isWebRtcPickupVariant(pendingPickup.pickup.variant)) return;
+    const key = `${pendingPickup.code}:${pendingPickup.pickup.variant}:${pendingPickup.pickup.expiresAt}:${pendingPickup.pickup.offer}`;
+    if (consumedPendingPickupRef.current === key) return;
+    consumedPendingPickupRef.current = key;
+    setTransferMode("receive");
+    setReceiverPickupInput(pendingPickup.code);
+    setReceiverPickupCode(pendingPickup.code);
+    setReceiverOfferInput(pendingPickup.pickup.offer);
+    setIsPickupBusy(true);
+    setReceiverStatus(`已读取 ${pendingPickup.pickup.variant.toUpperCase()} 取件码，正在生成 Answer...`);
+    void createAnswerFromOffer(pendingPickup.pickup.offer, pendingPickup.code).finally(() => {
+      setIsPickupBusy(false);
+    });
+  }, [pendingPickup, variant]);
 
   async function applyAnswerToSender(answerOverride = senderAnswerInput) {
     try {
@@ -1535,9 +1593,10 @@ export function TransferPage({ variant }: { variant: TransferVariant }) {
                     setSenderHandshakeStage(senderOffer ? "answer" : "offer");
                   }}
                 />
+                {methodSelector}
                 <RoleOption
                   title="接收文件"
-                  description={pickupEnabled ? "输入 8 位取件码自动连接" : `粘贴 ${signalPrefix}Offer，生成 Answer`}
+                  description={pickupEnabled ? "输入 8 位取件码自动识别方法" : `粘贴 ${signalPrefix}Offer，生成 Answer`}
                   icon={Download}
                   selected={transferMode === "receive"}
                   onClick={() => {

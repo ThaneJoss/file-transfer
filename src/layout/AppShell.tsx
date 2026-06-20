@@ -1,25 +1,18 @@
 import { Cloud, LogIn, LogOut } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 
-import { formatBytes } from "../lib/files/format";
+import { formatBytes, formatPercent } from "../lib/files/format";
 import { useAuth } from "../lib/auth/AuthProvider";
+import type { UsageSnapshot, UsageService } from "../lib/auth/AuthProvider";
 
-export type AppRouteId = "direct" | "stun" | "turn" | "sfu" | "r2";
-
-export type AppRoute = {
-  id: AppRouteId;
-  label: string;
-  path: string;
-};
-
-export const routes: AppRoute[] = [
-  { id: "direct", label: "Direct", path: "/direct" },
-  { id: "stun", label: "STUN", path: "/stun" },
-  { id: "turn", label: "TURN", path: "/turn" },
-  { id: "sfu", label: "SFU", path: "/sfu" },
-  { id: "r2", label: "R2", path: "/r2" },
+const headerUsageRows: Array<{ service: Exclude<UsageService, "durable">; label: string }> = [
+  { service: "direct", label: "Direct" },
+  { service: "stun", label: "STUN" },
+  { service: "turn", label: "TURN" },
+  { service: "sfu", label: "SFU" },
+  { service: "r2", label: "R2" },
 ];
 
 export function AppShell({
@@ -27,12 +20,8 @@ export function AppShell({
 }: {
   children?: ReactNode;
 }) {
-  const location = useLocation();
   const { session, usage, signOut } = useAuth();
   const [accountError, setAccountError] = useState("");
-  const activeRoute = routes.find((route) => route.path === location.pathname);
-  const activeRouteIndex = activeRoute ? routes.findIndex((route) => route.id === activeRoute.id) : 0;
-  const usageLabel = `TURN ${formatBytes(usage.services.turn.bytes)} · SFU ${formatBytes(usage.services.sfu.bytes)} · R2 ${formatBytes(usage.services.r2.bytes)}`;
 
   return (
     <main
@@ -40,12 +29,12 @@ export function AppShell({
       data-testid="app-shell"
     >
       <header
-        className="mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(160px,260px)] items-center gap-4 max-[1040px]:grid-cols-1 max-[1040px]:justify-items-center"
+        className="mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(260px,340px)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
         data-testid="app-header"
       >
         <Link
           className="inline-flex w-fit items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
-          to={routes[0].path}
+          to="/"
           aria-label="文件中转站首页"
           data-testid="app-brand"
         >
@@ -55,50 +44,15 @@ export function AppShell({
           <strong>文件中转站</strong>
         </Link>
 
-        <nav
-          className="mx-auto min-w-0 max-w-full overflow-x-auto rounded-2xl border border-white/70 bg-white/70 p-1.5 text-[16px] font-extrabold text-[#344a68] shadow-[0_14px_38px_rgba(23,54,97,0.08)] backdrop-blur max-[700px]:w-full max-[560px]:text-sm"
-          aria-label="功能导航"
-          data-testid="app-nav"
-        >
-          <div className="relative grid min-w-[520px] grid-cols-5 max-[700px]:min-w-0">
-            <span
-              aria-hidden="true"
-              className={`absolute inset-y-0 left-0 z-0 w-1/5 rounded-xl bg-[#1677ff] shadow-[0_10px_26px_rgba(47,125,246,0.22)] ${
-                activeRoute ? "opacity-100" : "opacity-0"
-              }`}
-              data-testid="nav-active-indicator"
-              style={{ transform: `translateX(${activeRouteIndex * 100}%)` }}
-            />
-            {routes.map((route) => {
-              const active = activeRoute?.id === route.id;
-              return (
-                <NavLink
-                  className={`relative z-10 flex min-h-12 w-full items-center justify-center whitespace-nowrap rounded-xl px-4 text-center transition-colors duration-200 max-[700px]:px-3 max-[700px]:py-2.5 ${
-                    active ? "text-white" : "text-[#344a68] hover:text-[#1476ff]"
-                  }`}
-                  key={route.id}
-                  to={route.path}
-                  data-route-id={route.id}
-                  data-testid={`nav-item-${route.id}`}
-                >
-                  {route.label}
-                </NavLink>
-              );
-            })}
-          </div>
-        </nav>
-
         <div className="flex min-w-0 justify-end" data-testid="account-area">
           {session ? (
-            <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)]">
-              <Link className="min-w-0 rounded-lg px-2 py-1 hover:bg-[#eaf2ff]" to="/account" aria-label="用户页面">
+            <div className="flex w-full min-w-0 items-start gap-2 rounded-2xl border border-white/70 bg-white/70 px-3 py-2 text-sm shadow-[0_14px_38px_rgba(23,54,97,0.08)]">
+              <Link className="min-w-0 flex-1 rounded-lg px-2 py-1 hover:bg-[#eaf2ff]" to="/account" aria-label="用户页面">
                 <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
-                <div className="whitespace-nowrap text-xs text-[#526c92]" aria-label="本月流量" title={usageLabel}>
-                  {usageLabel}
-                </div>
+                <HeaderUsageBars usage={usage} />
               </Link>
               <button
-                className="rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
+                className="mt-0.5 rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
                 onClick={() => void signOut().catch((error) => setAccountError(error instanceof Error ? error.message : "退出登录失败。"))}
                 aria-label="退出登录"
                 title={accountError || "退出登录"}
@@ -120,5 +74,30 @@ export function AppShell({
         {children ?? <Outlet />}
       </section>
     </main>
+  );
+}
+
+function HeaderUsageBars({ usage }: { usage: UsageSnapshot }) {
+  return (
+    <div className="mt-1 grid gap-0.5" aria-label="本月传输额度" data-testid="header-usage-bars">
+      {headerUsageRows.map((row) => {
+        const summary = usage.services[row.service];
+        const percent = summary.quota && summary.quota > 0 ? Math.min(100, (summary.usage / summary.quota) * 100) : null;
+        return (
+          <div className="grid min-w-0 grid-cols-[42px_minmax(0,1fr)_58px] items-center gap-1.5 text-[10px] leading-3" key={row.service}>
+            <span className="truncate font-bold text-[#526c92]">{row.label}</span>
+            <span className="h-1.5 overflow-hidden rounded-full bg-[#dceafa]">
+              <span
+                className="block h-full rounded-full bg-[#1677ff]"
+                style={{ width: percent === null ? "0%" : formatPercent(percent) }}
+              />
+            </span>
+            <span className="truncate text-right font-bold text-[#526c92]" title={`${formatBytes(summary.usage)} / ${summary.quota === null ? "未配置" : formatBytes(summary.quota)}`}>
+              {percent === null ? formatBytes(summary.usage) : formatPercent(percent)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }

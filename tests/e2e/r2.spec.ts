@@ -95,7 +95,7 @@ test.describe("R2 page", () => {
     await expect(page.getByText(/对象 Key 由服务端生成/)).toBeVisible();
     await page.getByRole("button", { name: /上传到 R2/ }).click();
     await expect(page.getByLabel(/发送方 R2 连接码/)).not.toHaveValue("");
-    await expect(page.getByText(/文件已上传到 R2/)).toBeVisible();
+    await expect(page.getByText(/取件码 12345678 已生成/)).toBeVisible();
     const encoded = await page.getByLabel(/发送方 R2 连接码/).inputValue();
     const payload = await decodeConnectionCodePayload(page, encoded);
     expect(Object.keys(payload).sort()).toEqual(["expiresAt", "file", "kind", "objectKey", "presignedUrl"]);
@@ -138,9 +138,21 @@ test.describe("R2 page", () => {
     );
     await openRoute(page, "r2");
     await chooseDownloadMode(page);
-    await page.getByLabel("发送方 R2 连接码").fill(r2Code());
-    await page.getByRole("button", { name: /读取连接码/ }).click();
-    await expect(page.getByText(/已读取连接码/)).toBeVisible();
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "r2",
+          offer: r2Code(),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("87654321");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
+    await expect(page.getByText(/取件码 87654321 已读取/)).toBeVisible();
     await page.getByRole("button", { name: /下载文件/ }).click();
     await expect(page.getByText(/文件已从 R2 下载完成/)).toBeVisible();
     await expect(page.evaluate(() => window.__appTest.objectUrls.created)).resolves.toBeGreaterThan(0);
@@ -152,16 +164,54 @@ test.describe("R2 page", () => {
   test("rejects invalid, expired, failed, and interrupted downloads", async ({ page }) => {
     await openRoute(page, "r2");
     await chooseDownloadMode(page);
-    await page.getByLabel("发送方 R2 连接码").fill("not-json");
-    await page.getByRole("button", { name: /读取连接码/ }).click();
+    await page.route(`${apiBaseUrl}/v1/pickups/87654321`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "r2",
+          offer: "not-json",
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("87654321");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
     await expect(page.getByRole("alert")).toContainText(/Unexpected token|R2 连接码格式不正确/);
 
-    await page.getByLabel("发送方 R2 连接码").fill(r2Code({ expiresAt: Date.now() - 1000 }));
+    await page.route(`${apiBaseUrl}/v1/pickups/11111111`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "r2",
+          offer: r2Code({ expiresAt: Date.now() - 1000 }),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("11111111");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
     await page.getByRole("button", { name: /下载文件/ }).click();
     await expect(page.getByRole("alert")).toContainText("预签名下载链接已过期");
 
     await page.route("https://example-account.r2.cloudflarestorage.com/**", (route) => route.fulfill({ status: 500, body: "server error" }));
-    await page.getByLabel("发送方 R2 连接码").fill(r2Code({ expiresAt: Date.now() + 3600_000 }));
+    await page.route(`${apiBaseUrl}/v1/pickups/22222222`, (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "found",
+          variant: "r2",
+          offer: r2Code({ expiresAt: Date.now() + 3600_000 }),
+          expiresAt: Date.now() + 3600_000,
+          answered: false,
+        }),
+      }),
+    );
+    await page.getByLabel("8 位取件码").fill("22222222");
+    await page.getByRole("button", { name: /读取取件码/ }).click();
     await page.getByRole("button", { name: /下载文件/ }).click();
     await expect(page.getByRole("alert")).toContainText("HTTP 500");
 

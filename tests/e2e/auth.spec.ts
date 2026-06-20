@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { apiBaseUrl, installAppMocks, installWebAuthnMocks, testAuthSession } from "./support/app";
 
 test.describe("authentication", () => {
-  test("redirects protected pages and signs in with passkey", async ({ page }) => {
+  test("signs in with passkey and returns to the home page", async ({ page }) => {
     await installAppMocks(page);
     await installWebAuthnMocks(page);
     await page.unroute(`${apiBaseUrl}/api/auth/get-session`);
@@ -47,8 +47,7 @@ test.describe("authentication", () => {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ success: true }) });
     });
 
-    await page.goto("/turn");
-    await expect(page).toHaveURL(/\/login$/);
+    await page.goto("/login");
     await expect(page.getByTestId("login-page")).toBeVisible();
     await expect(page.getByTestId("app-shell")).toHaveCount(0);
     await expect(page.getByTestId("app-nav")).toHaveCount(0);
@@ -57,13 +56,16 @@ test.describe("authentication", () => {
     await expect(page.getByLabel("Password")).toHaveCount(0);
     await page.getByRole("button", { name: "使用 Passkey 登录" }).click();
 
-    await expect(page).toHaveURL(/\/turn$/);
-    await expect(page.getByText("TURN Relay DataChannel")).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByText("Direct DataChannel", { exact: true })).toBeVisible();
     await expect(page.getByTestId("account-area")).toContainText("测试用户");
-    await expect(page.getByLabel("本月流量")).toContainText("TURN 2.00 MB · SFU 4.00 MB · R2 3.00 MB");
+    await expect(page.getByTestId("header-usage-bars")).toContainText("TURN");
+    await expect(page.getByTestId("header-usage-bars")).toContainText("SFU");
+    await expect(page.getByTestId("header-usage-bars")).toContainText("R2");
 
     await page.getByLabel("退出登录").click();
-    await expect(page).toHaveURL(/\/login$/);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("link", { name: "登录" })).toBeVisible();
   });
 
   test("shows the signed-in user's monthly traffic usage", async ({ page }) => {
@@ -208,7 +210,7 @@ test.describe("authentication", () => {
     await page.getByLabel("Name").fill("测试用户");
     await page.getByRole("button", { name: "创建 Passkey 并登录" }).click();
 
-    await expect(page).toHaveURL(/\/turn$/);
+    await expect(page).toHaveURL(/\/$/);
     await expect(page.getByTestId("account-area")).toContainText("测试用户");
   });
 });
