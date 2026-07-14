@@ -57,11 +57,10 @@ test.describe("authentication", () => {
     await page.getByRole("button", { name: "使用 Passkey 登录" }).click();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText("Direct DataChannel", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("unified-transfer-page")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "传文件，只需要一个取件码" })).toBeVisible();
     await expect(page.getByTestId("account-area")).toContainText("测试用户");
-    await expect(page.getByTestId("header-usage-bars")).toContainText("TURN");
-    await expect(page.getByTestId("header-usage-bars")).toContainText("SFU");
-    await expect(page.getByTestId("header-usage-bars")).toContainText("R2");
+    await expect(page.getByTestId("header-usage-summary")).toContainText("15.00 MB / 50.00 MB");
 
     await page.getByLabel("退出登录").click();
     await expect(page).toHaveURL(/\/$/);
@@ -74,16 +73,16 @@ test.describe("authentication", () => {
     await page.goto("/account");
 
     await expect(page.getByTestId("user-usage-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "用户用量" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "账户与用量" })).toBeVisible();
     await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
     await expect(page.getByText("本月总流量")).toBeVisible();
     await expect(page.getByText("15.00 MB")).toBeVisible();
-    await expect(page.getByTestId("usage-card-direct")).toContainText("1.00 MB");
-    await expect(page.getByTestId("usage-card-stun")).toContainText("5.00 MB");
-    await expect(page.getByTestId("usage-card-turn")).toContainText("2.00 MB");
-    await expect(page.getByTestId("usage-card-sfu")).toContainText("4.00 MB");
     await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
     await expect(page.getByTestId("usage-card-durable")).toContainText("7 次");
+    await expect(page.getByTestId("usage-card-direct")).toHaveCount(0);
+    await expect(page.getByTestId("usage-card-stun")).toHaveCount(0);
+    await expect(page.getByTestId("usage-card-turn")).toHaveCount(0);
+    await expect(page.getByTestId("usage-card-sfu")).toHaveCount(0);
   });
 
   test("refreshes usage when entering the account page and clicking refresh", async ({ page }) => {
@@ -102,12 +101,12 @@ test.describe("authentication", () => {
     await expect(page.getByTestId("user-usage-page")).toBeVisible();
     await expect.poll(() => usageRequests).toBeGreaterThanOrEqual(2);
     const enteredVersion = usageRequests;
-    await expect(page.getByTestId("usage-card-turn")).toContainText(usageMbLabel(enteredVersion));
+    await expect(page.getByTestId("usage-card-r2")).toContainText(usageMbLabel(enteredVersion));
 
     await page.getByRole("button", { name: /^刷新$/ }).click();
     await expect.poll(() => usageRequests).toBeGreaterThan(enteredVersion);
     const refreshedVersion = usageRequests;
-    await expect(page.getByTestId("usage-card-turn")).toContainText(usageMbLabel(refreshedVersion));
+    await expect(page.getByTestId("usage-card-r2")).toContainText(usageMbLabel(refreshedVersion));
   });
 
   test("updates the signed-in user's name", async ({ page }) => {
@@ -220,7 +219,7 @@ function apiRoutePattern(path: string) {
   return new RegExp(`^${escapedBaseUrl}${path}(?:\\?.*)?$`);
 }
 
-function usageResponse(turnMegabytes: number) {
+function usageResponse(fileMegabytes: number) {
   const mebibyte = 1024 * 1024;
   return {
     period: {
@@ -229,11 +228,11 @@ function usageResponse(turnMegabytes: number) {
       timezone: "UTC",
     },
     summary: [
-      { service: "turn", bytes: turnMegabytes * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "turn", bytes: 2 * mebibyte, quotaBytes: 10 * mebibyte },
       { service: "sfu", bytes: 4 * mebibyte, quotaBytes: 10 * mebibyte },
-      { service: "r2", bytes: 3 * mebibyte, quotaBytes: 10 * mebibyte },
+      { service: "r2", bytes: fileMegabytes * mebibyte, quotaBytes: 10 * mebibyte },
     ],
-    totalBytes: (turnMegabytes + 7) * mebibyte,
+    totalBytes: (fileMegabytes + 6) * mebibyte,
     totalQuotaBytes: 30 * mebibyte,
   };
 }

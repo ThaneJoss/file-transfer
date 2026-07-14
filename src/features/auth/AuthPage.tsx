@@ -52,7 +52,7 @@ export function AuthPage() {
           {mode === "sign-in" ? "Passkey 登录" : "Passkey 注册"}
         </h1>
         <p className="mt-2 text-[15px] text-[#526c92]">
-          只使用 Passkey 鉴权。登录后可使用 TURN、R2 和 SFU，Direct 与 STUN 无需登录。
+          只使用 Passkey 鉴权。登录后即可通过取件码安全地上传或下载文件。
         </p>
         <form className="mt-6 grid gap-4" onSubmit={(event) => void submit(event)}>
           {mode === "sign-up" && (

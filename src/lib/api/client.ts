@@ -75,8 +75,13 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   return body as T;
 }
 
-export function apiJson<T>(path: string, method: "POST" | "PUT", body: unknown) {
-  return apiRequest<T>(path, { method, body: JSON.stringify(body) });
+export function apiJson<T>(
+  path: string,
+  method: "POST" | "PUT",
+  body: unknown,
+  init: Omit<RequestInit, "method" | "body"> = {},
+) {
+  return apiRequest<T>(path, { ...init, method, body: JSON.stringify(body) });
 }
 
 export function notifyApiUsageChanged() {

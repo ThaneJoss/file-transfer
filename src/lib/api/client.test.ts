@@ -32,9 +32,9 @@ describe("API client", () => {
     const listener = vi.fn();
     window.addEventListener(API_USAGE_CHANGED_EVENT, listener);
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/turn/credentials", () => HttpResponse.json({ iceServers: [] })),
+      http.post("https://api.file.thanejoss.com/v1/r2/credentials", () => HttpResponse.json({ objectKey: "test" })),
     );
-    await apiJson("/v1/turn/credentials", "POST", { ttlSeconds: 3600 });
+    await apiJson("/v1/r2/credentials", "POST", { ttlSeconds: 3600 });
     expect(listener).toHaveBeenCalledOnce();
     window.removeEventListener(API_USAGE_CHANGED_EVENT, listener);
   });

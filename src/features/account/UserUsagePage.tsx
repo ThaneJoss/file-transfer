@@ -14,12 +14,8 @@ const serviceRows: Array<{
   label: string;
   description: string;
 }> = [
-  { service: "direct", label: "Direct", description: "局域网/直连传输流量" },
-  { service: "stun", label: "STUN", description: "公网点对点传输流量" },
-  { service: "turn", label: "TURN", description: "中继传输流量" },
-  { service: "sfu", label: "SFU", description: "服务器转发流量" },
-  { service: "r2", label: "R2", description: "对象存储上传/下载流量" },
-  { service: "durable", label: "Durable", description: "取件码信令请求次数" },
+  { service: "r2", label: "文件流量", description: "文件上传与下载流量" },
+  { service: "durable", label: "取件码请求", description: "生成和读取取件码的次数" },
 ];
 
 export function UserUsagePage() {
@@ -83,9 +79,9 @@ export function UserUsagePage() {
   return (
     <div className="mx-auto grid w-full max-w-[1100px] gap-4 py-2" data-testid="user-usage-page">
       <Panel className="p-6">
-        <div className="inline-card-header">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
           <div className="min-w-0">
-            <h1 className="text-[26px] font-extrabold text-[#061b3a]">用户用量</h1>
+            <h1 className="text-[26px] font-extrabold text-[#061b3a]">账户与用量</h1>
             <p className="mt-1 text-sm text-[#526c92]">
               {accountName} · {formatPeriod(usage.period)}
             </p>
@@ -126,8 +122,8 @@ export function UserUsagePage() {
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <UsageMetric label="本月总流量" value={formatBytes(usage.totalBytes)} />
           <UsageMetric label="本月总额度" value={formatQuota(usage.totalQuotaBytes)} />
-          <UsageMetric label="Durable 请求" value={formatQuantity(usage.totals.requests, "requests")} />
-          <UsageMetric label="Durable 额度" value={formatQuotaByUnit(usage.quotas.requests, "requests")} />
+          <UsageMetric label="取件码请求" value={formatQuantity(usage.totals.requests, "requests")} />
+          <UsageMetric label="请求额度" value={formatQuotaByUnit(usage.quotas.requests, "requests")} />
         </div>
 
         {error && <div className="mt-4"><StatusMessage message={error} tone="error" /></div>}
