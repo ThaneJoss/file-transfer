@@ -66,16 +66,10 @@ jobs:
         include:
           - group: layout
             specs: tests/e2e/navigation-layout.spec.ts
-          - group: direct
-            specs: tests/e2e/direct.spec.ts
-          - group: r2-live
-            specs: tests/e2e/r2.spec.ts tests/e2e/live/live.spec.ts
-          - group: sfu
-            specs: tests/e2e/sfu.spec.ts
-          - group: stun
-            specs: tests/e2e/stun.spec.ts
-          - group: turn
-            specs: tests/e2e/turn.spec.ts
+          - group: transfer
+            specs: tests/e2e/transfer.spec.ts
+          - group: auth
+            specs: tests/e2e/auth.spec.ts
     steps:
       - name: Checkout
         uses: actions/checkout@v4

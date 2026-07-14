@@ -5,11 +5,11 @@ import { server } from "../../../test/mocks/server";
 import { requestR2Credentials } from "./r2Credentials";
 
 describe("R2 temporary credentials", () => {
-  it("requests a server-generated object key with a 900 second TTL", async () => {
+  it("requests a server-generated object key with a large-file-safe TTL", async () => {
     server.use(
       http.post("https://api.file.thanejoss.com/v1/r2/credentials", async ({ request }) => {
         expect(request.credentials).toBe("include");
-        expect(await request.json()).toEqual({ fileName: "测试.txt", fileSizeBytes: 1024, ttlSeconds: 900 });
+        expect(await request.json()).toEqual({ fileName: "测试.txt", fileSizeBytes: 1024, ttlSeconds: 3600 });
         return HttpResponse.json({
           accountId: "account",
           bucket: "bucket",

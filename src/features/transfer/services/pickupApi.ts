@@ -1,7 +1,6 @@
 import { apiJson, apiRequest, notifyApiUsageChanged } from "../../../lib/api/client";
 
 export type PickupVariant = "direct" | "stun" | "turn" | "sfu" | "r2";
-export type WebRtcPickupVariant = Extract<PickupVariant, "direct" | "stun" | "turn">;
 export type PickupPayload = {
   status: "found";
   variant: PickupVariant;
@@ -9,53 +8,18 @@ export type PickupPayload = {
   expiresAt: number;
   answered: boolean;
 };
-export type PendingPickup = {
-  code: string;
-  pickup: PickupPayload;
-};
 
-export async function createPickup(variant: PickupVariant, offer: string) {
+export async function createPickup(offer: string, signal?: AbortSignal) {
   const result = await apiJson<{ code: string; expiresAt: number }>("/v1/pickups", "POST", {
-    variant,
+    variant: "r2",
     offer,
-  });
+  }, { signal });
   notifyApiUsageChanged();
   return result;
 }
 
-export async function getPickup(code: string) {
-  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, { cache: "no-store" });
-  notifyApiUsageChanged();
-  return result;
-}
-
-export async function submitPickupAnswer(code: string, answer: string) {
-  const result = await apiJson<{ accepted: true }>(
-    `/v1/pickups/${encodeURIComponent(code)}/answer`,
-    "PUT",
-    { answer },
-  );
-  notifyApiUsageChanged();
-  return result;
-}
-
-export function getPickupAnswer(code: string) {
-  return apiRequest<{ answer: string | null }>(
-    `/v1/pickups/${encodeURIComponent(code)}/answer`,
-    { cache: "no-store" },
-  );
-}
-
-export async function recordTransferUsage(
-  service: WebRtcPickupVariant,
-  bytes: number,
-  transferId: string,
-) {
-  const result = await apiJson<{ recorded: boolean }>("/v1/usage/transfers", "POST", {
-    service,
-    bytes,
-    transferId,
-  });
+export async function getPickup(code: string, signal?: AbortSignal) {
+  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, { cache: "no-store", signal });
   notifyApiUsageChanged();
   return result;
 }

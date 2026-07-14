@@ -29,7 +29,7 @@ export default defineConfig({
   ],
   webServer: {
     command: webServerCommand,
-    url: `http://127.0.0.1:${port}/direct`,
+    url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

@@ -1,96 +1,62 @@
 # 文件中转站
 
-浏览器文件传输工具，首页提供 Direct、STUN、TURN、SFU 和 R2 五种传输方法。Direct/STUN
-公开使用；登录后五种方法都可使用 8 位取件码自动交换或读取信令。TURN/SFU/R2 通过 Better Auth
-session 访问后端控制面。
+一个面向普通用户的临时文件上传与下载页面。发送方上传文件后获得 8 位取件码；接收方输入取件码，页面按照协议中的路由下载文件并校验完整性。
 
-## Scripts
+## 当前流程
+
+1. 使用 Passkey 登录。
+2. 上传文件。浏览器分块计算 SHA-256，并把 `File` 直接流向对象存储。
+3. 页面发布 `file-transfer-v2` 协议和 8 位取件码；协议包含文件清单、短期签名下载路由和过期时间，不包含签名所用的 secret access key。
+4. 接收方读取取件码，确认文件名和大小后下载。
+5. 下载过程中逐块校验字节数和 SHA-256；数据不完整或被篡改时不会提示成功。
+
+产品页只有“上传文件”和“下载文件”两个入口。Direct、STUN、TURN、SFU、R2 等实现细节不再作为用户可选页面；当前协议路由到临时对象存储，后续可以在协议路由层扩展其他实现。
+
+## 大文件与取消
+
+- 上传前以 4 MiB 分块计算 SHA-256，上传时直接传递浏览器 `File`，不会先把整个文件转成 `ArrayBuffer`。
+- 支持 File System Access API 的 Chrome / Edge 会把下载流直接写入用户选择的位置。
+- 其他浏览器使用内存下载，单文件限制为 128 MiB，避免不可控的内存占用。
+- 上传、读取取件码和下载都支持取消。新的操作会终止旧操作，并通过操作编号忽略迟到的异步结果。
+- 当前临时上传授权、下载链接和取件码按一小时有效设计；最终时限以 API 返回值为准。
+
+## 代码结构
+
+- `src/features/transfer/protocol/fileProtocol.ts`：版本化文件协议和运行时校验。
+- `src/features/transfer/protocol/fileStream.ts`：增量哈希、流式接收、大小与 SHA-256 校验。
+- `src/features/transfer/services/r2Transfer.ts`：发送端上传及取件码发布。
+- `src/features/transfer/services/transferRouter.ts`：按协议解析下载路由并保存文件。
+- `src/features/transfer/hooks/useFileSender.ts`：发送端状态和动作。
+- `src/features/transfer/hooks/useFileReceiver.ts`：接收端状态和动作。
+- `src/features/transfer/hooks/useTransferLifecycle.ts`：取消、竞态隔离和卸载清理。
+- `src/features/transfer/FileTransferPage.tsx`：统一上传 / 下载产品页。
+
+## 本地开发
+
+要求 Node.js 24 和 pnpm 11.6。
 
 ```bash
+pnpm install --frozen-lockfile
+cp .env.example .env.local
 pnpm dev
+```
+
+`VITE_API_BASE_URL` 可选；不设置时使用生产 API `https://api.file.thanejoss.com`。API 负责 Passkey 会话、临时对象存储凭证和取件码，浏览器不会持有长期存储密钥。
+
+## 验证
+
+```bash
 pnpm typecheck
 pnpm test:unit
-pnpm test:coverage
 pnpm test:e2e
-pnpm check
 pnpm build
-pnpm preview
 ```
 
-`pnpm check` 会依次运行类型检查、Vitest 单元测试、Playwright 端到端测试和生产构建。默认测试全部使用假值和网络拦截，不需要真实 Cloudflare 凭证，也不会访问生产服务。
+`pnpm check` 会串行执行全部检查。端到端测试使用网络 mock 覆盖上传、协议发布、完整下载、内容损坏、取消竞态和旧协议拒绝，不会写入真实账户或对象存储。
 
-首次在本地运行端到端测试前安装浏览器：
+## 部署注意事项
 
-```bash
-pnpm exec playwright install chromium
-```
-
-如果只需要无头测试环境，可以使用：
-
-```bash
-pnpm exec playwright install chromium --only-shell
-```
-
-## Testing
-
-- Vitest 覆盖 TURN/SFU API service、R2 SigV4 签名和通用协议边界。
-- Playwright 覆盖首页五种传输方法的刷新、基础表单、成功路径、主要错误路径和资源清理。
-- `tests/e2e/navigation-layout.spec.ts` 覆盖 1440x900、1280x800、390x844 三种视口，包含方法切换、快速切换、重复点击和滚动条状态。
-
-可选真实集成测试与默认测试分离：
-
-```bash
-pnpm test:e2e:live
-```
-
-live 测试默认跳过。不要把真实 session、临时凭证写入源码、fixture、`.env.example`、Playwright storage state、截图、trace、video 或报告。
-
-## API 与鉴权
-
-生产环境默认使用 `https://api.file.thanejoss.com`。本地连接 Worker 时设置：
-
-```bash
-VITE_API_BASE_URL=http://localhost:8787 pnpm dev
-```
-
-注册、登录、退出和 session 由 Better Auth 提供，前端只提供 Passkey 鉴权。注册时前端先调用 `POST /v1/passkey/registration-context` 取得一次性 `context`，再交给 Better Auth Passkey 注册；登录直接调用 Better Auth Passkey。所有后端 API 请求携带 session cookie；用户页展示 Direct、STUN、TURN、SFU、R2 流量和 Durable 取件码请求次数及额度。
-
-本地 Worker 鉴权环境需要与前端 origin 匹配：
-
-```bash
-BETTER_AUTH_URL=http://localhost:8787
-APP_ORIGIN=http://localhost:5173
-```
-
-## Deploy
-
-默认构建产物在 `dist/`，可用于 Cloudflare Pages、Vercel 或其他静态前端托管平台。
-
-## TURN
-
-首页选择 TURN 方法后，生成 TURN Offer 或 TURN Answer 时会通过后端自动申请临时 `iceServers`：
-
-```text
-POST /v1/turn/credentials
-```
-
-拿到临时 `iceServers` 后，页面会用 `iceTransportPolicy: "relay"` 强制通过 TURN relay 传输文件，临时 TURN 凭证不会写入连接码。
-
-## 取件码
-
-登录用户选择文件后，前端生成 Offer，并调用 `POST /v1/pickups` 创建唯一的 8 位
-取件码。接收方输入取件码读取 Offer、生成 Answer 并写回，发送方轮询 Answer 后
-自动建立 DataChannel。Durable Object 只保存一小时内的信令；文件始终点对点传输。
-
-未登录用户不会看到取件码输入或生成入口，仍可使用原有手动 Offer/Answer 流程。
-Direct/STUN 发送完成后，发送端通过 `/v1/usage/transfers` 幂等上报实际文件字节。TURN/SFU/R2 的取件码保存对应的临时信令或下载信息，文件内容仍不写入 Durable Object。
-
-## Security
-
-TURN、R2、SFU 长期密钥只存在后端。R2 临时凭证仅保存在发送方页面内存中，PUT 直接上传到 R2；连接码只携带服务端生成的对象 Key、文件信息、预签名下载 URL 和过期时间。SFU 控制请求统一经过 `/v1/sfu`，前端不接触 App Token。
-
-SFU 文件传输使用 v2 连接码和应用层流式协议：发送端根据 `RTCSctpTransport.maxMessageSize` 动态分块，每个二进制块携带文件 ID 与序号，接收端按顺序写入并校验增量 SHA-256。支持 File System Access API 的浏览器会直接写入用户选择的文件；其他浏览器仅对不超过 128 MB 的文件使用内存 Blob 回退。
-
-## Dependency Audit
-
-现代库和自实现能力审计见 [`docs/dependency-audit.md`](docs/dependency-audit.md)。
+- 对象存储 CORS 需要允许站点 Origin、`PUT` / `GET` 和签名请求头。
+- `/assets/*` 使用带内容哈希的长期不可变缓存，其他路径回退到 `index.html`。
+- `index.html` 的模块脚本标记了 `data-cfasync="false"`，避免 Cloudflare Rocket Loader 改写启动脚本。
+- 临时对象的最终清理策略由对象存储生命周期规则负责，前端只控制访问链接的有效期。

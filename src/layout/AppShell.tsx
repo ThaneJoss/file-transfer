@@ -3,20 +3,9 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Link, Outlet } from "react-router-dom";
 
-import { formatBytes, formatPercent } from "../lib/files/format";
+import { formatBytes } from "../lib/files/format";
 import { useAuth } from "../lib/auth/AuthProvider";
-import type { UsageSnapshot, UsageService } from "../lib/auth/AuthProvider";
-
-const headerUsageRows: Array<{ service: Exclude<UsageService, "durable">; label: string; color: string }> = [
-  { service: "direct", label: "Direct", color: "#1677ff" },
-  { service: "stun", label: "STUN", color: "#23a26d" },
-  { service: "turn", label: "TURN", color: "#ef8f25" },
-  { service: "sfu", label: "SFU", color: "#7c5cff" },
-  { service: "r2", label: "R2", color: "#0e9fb3" },
-];
-
-const usageRingRadius = 17;
-const usageRingCircumference = 2 * Math.PI * usageRingRadius;
+import type { UsageSnapshot } from "../lib/auth/AuthProvider";
 
 export function AppShell({
   children,
@@ -51,7 +40,7 @@ export function AppShell({
           {session ? (
             <div className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-3 py-2 text-sm">
               <Link
-                className="grid min-w-0 flex-1 grid-cols-[minmax(86px,auto)_auto] items-center gap-3 rounded-xl px-2 py-1 hover:bg-[#eaf2ff] max-[520px]:grid-cols-1 max-[520px]:gap-1.5"
+                className="grid min-w-0 flex-1 grid-cols-[minmax(86px,auto)_minmax(110px,150px)] items-center gap-3 rounded-xl px-2 py-1 hover:bg-[#eaf2ff] max-[520px]:grid-cols-1 max-[520px]:gap-1.5"
                 to="/account"
                 aria-label="用户页面"
               >
@@ -59,7 +48,7 @@ export function AppShell({
                   <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
                   <div className="text-[11px] font-semibold text-[#6b7f9f]">本月用量</div>
                 </div>
-                <HeaderUsageBars usage={usage} />
+                <HeaderUsageSummary usage={usage} />
               </Link>
               <button
                 className="mt-0.5 rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
@@ -87,39 +76,19 @@ export function AppShell({
   );
 }
 
-function HeaderUsageBars({ usage }: { usage: UsageSnapshot }) {
-  return (
-    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2" aria-label="本月传输额度" data-testid="header-usage-bars">
-      {headerUsageRows.map((row) => {
-        const summary = usage.services[row.service];
-        const percent = summary.quota && summary.quota > 0 ? Math.min(100, (summary.usage / summary.quota) * 100) : null;
-        const normalizedPercent = percent === null ? 0 : Math.max(0, Math.min(100, percent));
-        const dash = (normalizedPercent / 100) * usageRingCircumference;
-        const displayValue = percent === null ? "--" : formatPercent(percent);
-        const title = `${row.label}: ${formatBytes(summary.usage)} / ${summary.quota === null ? "未配置" : formatBytes(summary.quota)}`;
+function HeaderUsageSummary({ usage }: { usage: UsageSnapshot }) {
+  const quota = usage.totalQuotaBytes;
+  const percent = quota && quota > 0 ? Math.min(100, (usage.totalBytes / quota) * 100) : 0;
+  const label = quota === null
+    ? `${formatBytes(usage.totalBytes)} 已用`
+    : `${formatBytes(usage.totalBytes)} / ${formatBytes(quota)}`;
 
-        return (
-          <div className="grid w-[46px] shrink-0 justify-items-center gap-1 text-center text-[10px] leading-none" key={row.service} title={title}>
-            <span className="relative grid size-11 place-items-center">
-              <svg className="absolute inset-0 size-11 -rotate-90" viewBox="0 0 44 44" aria-hidden="true">
-                <circle cx="22" cy="22" fill="none" r={usageRingRadius} stroke="#dceafa" strokeWidth="5" />
-                <circle
-                  cx="22"
-                  cy="22"
-                  fill="none"
-                  r={usageRingRadius}
-                  stroke={row.color}
-                  strokeDasharray={`${dash} ${usageRingCircumference - dash}`}
-                  strokeLinecap="round"
-                  strokeWidth="5"
-                />
-              </svg>
-              <span className="relative font-extrabold text-[#071b3a]">{displayValue}</span>
-            </span>
-            <span className="max-w-full truncate font-extrabold text-[#526c92]">{row.label}</span>
-          </div>
-        );
-      })}
+  return (
+    <div className="grid min-w-0 gap-1.5" aria-label="本月文件用量" data-testid="header-usage-summary" title={label}>
+      <span className="truncate text-right text-xs font-extrabold text-[#365a88] max-[520px]:text-center">{label}</span>
+      <span className="h-2 overflow-hidden rounded-full bg-[#dce8f7]">
+        <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${percent}%` }} />
+      </span>
     </div>
   );
 }

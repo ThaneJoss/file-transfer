@@ -1,153 +1,37 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import {
   collectConsoleErrors,
-  expectActiveNav,
   expectNoConsoleErrors,
   expectNoHorizontalOverflow,
-  expectNoLayoutOverflow,
-  expectRectStable,
-  expectSharedPanelsVisible,
-  expectStatusPanelDetailsSwitches,
-  expectSliderAligned,
-  expectStatusPanelUsesFullLeftRail,
-  getLayoutMetrics,
   installAppMocks,
-  openRoute,
-  routeIds,
-  routePath,
-  type RouteId,
-  waitForLayoutStable,
 } from "./support/app";
 
-const routeCoverageViewports = [
-  { width: 1920, height: 868 },
-  { width: 1280, height: 800 },
+for (const viewport of [
+  { width: 1440, height: 900 },
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
-];
+]) {
+  test(`keeps the primary upload and download actions usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const consoleErrors = collectConsoleErrors(page);
+    await installAppMocks(page);
+    await page.goto("/");
 
-const stableGeometryViewports = [
-  { width: 1440, height: 900 },
-];
+    await expect(page.getByTestId("unified-transfer-page")).toBeVisible();
+    await expect(page.getByTestId("transfer-mode-upload")).toBeVisible();
+    await expect(page.getByTestId("upload-dropzone")).toBeInViewport();
+    await expect(page.getByTestId("transfer-method-selector")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
 
-const stableLayoutKeys = [
-  "brand",
-  "header",
-  "pageSlot",
-  "workspace",
-  "statusPanel",
-  "statusSteps",
-  "targetPanel",
-  "uploadPanel",
-  "fileListPanel",
-  "uploadDropzone",
-] as const;
-
-for (const viewport of routeCoverageViewports) {
-  test.describe(`route accessibility and overflow ${viewport.width}x${viewport.height}`, () => {
-    let consoleErrors: string[];
-
-    test.beforeEach(async ({ page }) => {
-      await page.setViewportSize(viewport);
-      consoleErrors = collectConsoleErrors(page);
-      await installAppMocks(page);
-    });
-
-    test.afterEach(async () => {
-      await expectNoConsoleErrors(consoleErrors);
-    });
-
-    test("renders every route with shared panels and no horizontal overflow", async ({ page }) => {
-      for (const route of routeIds) {
-        await openRoute(page, route);
-        await waitForLayoutStable(page);
-        await expectActiveNav(page, route);
-        await expectSharedPanelsVisible(page);
-        await expectSliderAligned(page);
-        await expectNoLayoutOverflow(page);
-        await expectStatusPanelUsesFullLeftRail(page);
-        if (route === "direct") {
-          await expectStatusPanelDetailsSwitches(page);
-        }
-      }
-    });
-  });
-}
-
-for (const viewport of stableGeometryViewports) {
-  test.describe(`navigation layout stability ${viewport.width}x${viewport.height}`, () => {
-    let consoleErrors: string[];
-
-    test.beforeEach(async ({ page }) => {
-      await page.setViewportSize(viewport);
-      consoleErrors = collectConsoleErrors(page);
-      await installAppMocks(page);
-    });
-
-    test.afterEach(async () => {
-      await expectNoConsoleErrors(consoleErrors);
-    });
-
-    test("keeps shared shell and workspace geometry stable through a full method cycle", async ({ page }) => {
-      const sequence: RouteId[] = ["stun", "turn", "sfu", "r2", "direct"];
-      await openRoute(page, "direct");
-      await waitForLayoutStable(page);
-      const baseline = await getLayoutMetrics(page);
-
-      for (const route of sequence) {
-        await page.getByTestId(`method-option-${route}`).click();
-        await expectActiveNav(page, route);
-        await waitForLayoutStable(page);
-        expectRectStable(baseline, await getLayoutMetrics(page), [...stableLayoutKeys]);
-        await expectSliderAligned(page);
-        await expectNoHorizontalOverflow(page);
-      }
-    });
-
-    test("handles rapid method clicks and repeated current-method clicks", async ({ page }) => {
-      await openRoute(page, "direct");
-      await waitForLayoutStable(page);
-      const before = await getLayoutMetrics(page);
-
-      for (const id of ["stun", "turn", "sfu", "r2"] as const) {
-        await page.getByTestId(`method-option-${id}`).click();
-      }
-      await expectActiveNav(page, "r2");
-      await waitForLayoutStable(page);
-      expectRectStable(before, await getLayoutMetrics(page), [...stableLayoutKeys]);
-      await expectSliderAligned(page);
-
-      const repeatBefore = await getLayoutMetrics(page);
-      await page.getByTestId("method-option-r2").click();
-      await expectActiveNav(page, "r2");
-      await waitForLayoutStable(page);
-      expectRectStable(repeatBefore, await getLayoutMetrics(page), [...stableLayoutKeys]);
-    });
-
-    test("keeps shared layout stable when vertical scrollbar state is forced", async ({ page }) => {
-      await openRoute(page, "direct");
-      await waitForLayoutStable(page);
-      const before = await getLayoutMetrics(page);
-      await page.evaluate(() => {
-        const filler = document.createElement("div");
-        filler.id = "scroll-filler";
-        filler.style.height = "1800px";
-        document.body.append(filler);
-      });
-      await waitForLayoutStable(page);
-      const withScrollbar = await getLayoutMetrics(page);
-      expectRectStable(before, withScrollbar, [...stableLayoutKeys]);
-
-      await page.getByTestId("method-option-r2").click();
-      await expectActiveNav(page, "r2");
-      await waitForLayoutStable(page);
-      expectRectStable(withScrollbar, await getLayoutMetrics(page), [...stableLayoutKeys]);
-
-      await page.evaluate(() => document.querySelector("#scroll-filler")?.remove());
-      await waitForLayoutStable(page);
-      expectRectStable(before, await getLayoutMetrics(page), [...stableLayoutKeys]);
-      await expectNoHorizontalOverflow(page);
-    });
+    await page.getByTestId("transfer-mode-download").click();
+    await expect(page.getByTestId("receiver-code")).toBeVisible();
+    await expect(page.getByTestId("receiver-code")).toBeInViewport();
+    const codeBox = await page.getByTestId("receiver-code").boundingBox();
+    expect(codeBox).not.toBeNull();
+    expect(codeBox!.x).toBeGreaterThanOrEqual(0);
+    expect(codeBox!.x + codeBox!.width).toBeLessThanOrEqual(viewport.width);
+    await expectNoHorizontalOverflow(page);
+    await expectNoConsoleErrors(consoleErrors);
   });
 }

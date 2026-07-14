@@ -1,35 +1,5 @@
 import type { ReactNode } from "react";
 
-export function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder,
-  readOnly = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  readOnly?: boolean;
-}) {
-  return (
-    <label className="grid min-w-0 gap-2">
-      <span className="min-w-0 truncate text-sm font-extrabold text-[#233d64]" title={label}>{label}</span>
-      <textarea
-        className={`h-[clamp(88px,10.5dvh,118px)] min-h-0 min-w-0 resize-none rounded-lg border border-[#d7e5f6] px-3 py-3 font-mono text-[12px] leading-relaxed text-[#17345f] outline-none placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-2 focus:ring-[#1677ff]/10 max-[1180px]:h-[128px] max-[560px]:h-[116px] ${
-          readOnly ? "bg-[#f7fbff]" : "bg-white"
-        }`}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        spellCheck={false}
-      />
-    </label>
-  );
-}
-
 export function TextInput({
   label,
   value,
