@@ -64,7 +64,7 @@ test.describe("authentication", () => {
 
     await page.getByLabel("退出登录").click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("link", { name: "登录" })).toBeVisible();
+    await expect(page.getByTestId("account-area").getByRole("link", { name: "登录", exact: true })).toBeVisible();
   });
 
   test("shows the signed-in user's monthly traffic usage", async ({ page }) => {
@@ -76,7 +76,7 @@ test.describe("authentication", () => {
     await expect(page.getByRole("heading", { name: "账户与用量" })).toBeVisible();
     await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
     await expect(page.getByText("本月总流量")).toBeVisible();
-    await expect(page.getByText("15.00 MB")).toBeVisible();
+    await expect(page.getByTestId("user-usage-page").getByText("15.00 MB", { exact: true })).toBeVisible();
     await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
     await expect(page.getByTestId("usage-card-durable")).toContainText("7 次");
     await expect(page.getByTestId("usage-card-direct")).toHaveCount(0);
