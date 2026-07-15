@@ -33,7 +33,10 @@ export function filterSessionDescriptionCandidates(
   description: RTCSessionDescriptionInit,
   allowedTypes: IceCandidateType[],
 ): RTCSessionDescriptionInit {
-  if (!description.sdp) return { ...description };
+  // RTCSessionDescription exposes `type` and `sdp` through prototype getters
+  // in real browsers, so spreading it produces an empty object. Copy the two
+  // protocol fields explicitly before serializing the signal.
+  if (!description.sdp) return { type: description.type, sdp: description.sdp };
 
   const sdp = description.sdp
     .split(/\r?\n/)
@@ -45,7 +48,7 @@ export function filterSessionDescriptionCandidates(
     })
     .join("\r\n");
 
-  return { ...description, sdp };
+  return { type: description.type, sdp };
 }
 
 export function summarizeIceCandidates(

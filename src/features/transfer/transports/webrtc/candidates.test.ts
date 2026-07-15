@@ -56,6 +56,21 @@ describe("WebRTC candidate routing", () => {
     });
   });
 
+  it("preserves fields exposed through RTCSessionDescription prototype getters", () => {
+    const platformDescription = Object.defineProperties({}, {
+      type: { configurable: true, get: () => "offer" },
+      sdp: {
+        configurable: true,
+        get: () => `v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=${host}\r\n`,
+      },
+    }) as RTCSessionDescriptionInit;
+
+    expect(Object.keys(platformDescription)).toEqual([]);
+    const signal = createWebRtcSignal("direct", "offer", platformDescription, []);
+    expect(signal.description.type).toBe("offer");
+    expect(signal.description.sdp).toContain(host);
+  });
+
   it("reports STUN unavailable instead of falling back to host", () => {
     expect(() => createWebRtcSignal("stun", "offer", {
       type: "offer",
