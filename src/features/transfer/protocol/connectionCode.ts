@@ -6,8 +6,8 @@ export function bytesToBase64Url(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-const maxEncodedCharacters = 80_000;
-const maxDecodedBytes = 256_000;
+const maxEncodedCharacters = 384 * 1024;
+const maxDecodedBytes = 384 * 1024;
 
 export function base64UrlToBytes(value: string) {
   if (value.length > maxEncodedCharacters) throw new Error("传输协议内容过大。");
@@ -22,16 +22,17 @@ export function base64UrlToBytes(value: string) {
 
 export async function encodeConnectionPayload(payload: unknown) {
   const json = JSON.stringify(payload);
+  if (new TextEncoder().encode(json).byteLength > maxDecodedBytes) throw new Error("传输协议内容过大。");
   const compression = globalThis.CompressionStream;
   if (!compression) {
-    return `J1.${bytesToBase64Url(new TextEncoder().encode(json))}`;
+    return assertEncodedSize(`J1.${bytesToBase64Url(new TextEncoder().encode(json))}`);
   }
 
   const source = new Response(json).body;
-  if (!source) return `J1.${bytesToBase64Url(new TextEncoder().encode(json))}`;
+  if (!source) return assertEncodedSize(`J1.${bytesToBase64Url(new TextEncoder().encode(json))}`);
   const stream = source.pipeThrough(new compression("gzip"));
   const buffer = await new Response(stream).arrayBuffer();
-  return `D1.${bytesToBase64Url(new Uint8Array(buffer))}`;
+  return assertEncodedSize(`D1.${bytesToBase64Url(new Uint8Array(buffer))}`);
 }
 
 export async function decodeConnectionPayload(value: string, decompressionError: string) {
@@ -81,4 +82,9 @@ async function readTextWithLimit(stream: ReadableStream<Uint8Array>, limit: numb
   } finally {
     reader.releaseLock();
   }
+}
+
+function assertEncodedSize(value: string) {
+  if (value.length > maxEncodedCharacters) throw new Error("传输协议内容过大。");
+  return value;
 }

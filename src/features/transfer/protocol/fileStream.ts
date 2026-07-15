@@ -73,6 +73,14 @@ export async function pickFileSystemReceiveTarget(suggestedName: string): Promis
   return { kind: "file-system", handle };
 }
 
+export async function chooseReceiveTargetForFile(file: Pick<{ name: string; size: number }, "name" | "size">) {
+  if (supportsFileSystemReceive()) return pickFileSystemReceiveTarget(file.name);
+  if (file.size > memoryReceiveLimitBytes) {
+    throw new Error("当前浏览器无法流式保存这个大文件。请使用最新版 Chrome 或 Edge，或接收不超过 128 MB 的文件。");
+  }
+  return { kind: "memory" } as ReceiveTarget;
+}
+
 export async function openReceiveSink(target: ReceiveTarget, mimeType: string): Promise<ReceiveSink> {
   if (target.kind === "file-system") {
     const writable = await target.handle.createWritable();

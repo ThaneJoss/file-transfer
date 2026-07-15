@@ -76,8 +76,7 @@ test.describe("authentication", () => {
     await expect(page.getByRole("heading", { name: "账户与用量" })).toBeVisible();
     await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
     await expect(page.getByText("本月总流量")).toBeVisible();
-    await expect(page.getByTestId("user-usage-page").getByText("15.00 MB", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("usage-card-r2")).toContainText("3.00 MB");
+    await expect(page.getByTestId("usage-card-files")).toContainText("15.00 MB");
     await expect(page.getByTestId("usage-card-durable")).toContainText("7 次");
     await expect(page.getByTestId("usage-card-direct")).toHaveCount(0);
     await expect(page.getByTestId("usage-card-stun")).toHaveCount(0);
@@ -101,12 +100,12 @@ test.describe("authentication", () => {
     await expect(page.getByTestId("user-usage-page")).toBeVisible();
     await expect.poll(() => usageRequests).toBeGreaterThanOrEqual(2);
     const enteredVersion = usageRequests;
-    await expect(page.getByTestId("usage-card-r2")).toContainText(usageMbLabel(enteredVersion));
+    await expect(page.getByTestId("usage-card-files")).toContainText(usageMbLabel(enteredVersion + 6));
 
     await page.getByRole("button", { name: /^刷新$/ }).click();
     await expect.poll(() => usageRequests).toBeGreaterThan(enteredVersion);
     const refreshedVersion = usageRequests;
-    await expect(page.getByTestId("usage-card-r2")).toContainText(usageMbLabel(refreshedVersion));
+    await expect(page.getByTestId("usage-card-files")).toContainText(usageMbLabel(refreshedVersion + 6));
   });
 
   test("updates the signed-in user's name", async ({ page }) => {

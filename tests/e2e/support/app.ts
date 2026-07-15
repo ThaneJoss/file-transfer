@@ -72,16 +72,19 @@ export async function installWebAuthnMocks(page: Page) {
 export type AppMockOptions = {
   signedIn?: boolean;
   pickupOffer?: string;
-  pickupVariant?: "direct" | "stun" | "turn" | "sfu" | "r2";
+  pickupVariant?: "direct" | "stun" | "turn" | "sfu" | "r2" | "multipath";
   downloadBody?: string | Uint8Array;
   r2FailureStatus?: number;
   r2CredentialDelayMs?: number;
+  disableRealtime?: boolean;
+  pickupSelection?: "direct" | "stun" | "turn" | "sfu" | "r2";
 };
 
 export async function installAppMocks(page: Page, options: AppMockOptions = {}) {
   let postedOffer = "";
   let uploadedBody: Buffer | null = null;
   let uploadHeaders: Record<string, string> = {};
+  let postedVariant = "";
 
   await page.addInitScript(() => {
     window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 } };
@@ -102,6 +105,28 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
       window.__appTest.downloads += 1;
     };
   });
+  await page.addInitScript((disableRealtime) => {
+    if (!disableRealtime) return;
+    class UnavailablePeerConnection extends EventTarget {
+      connectionState = "new";
+      iceConnectionState = "new";
+      iceGatheringState = "new";
+      localDescription = null;
+      remoteDescription = null;
+      createDataChannel() {
+        return {
+          binaryType: "arraybuffer",
+          readyState: "closed",
+          close() {},
+          addEventListener() {},
+          removeEventListener() {},
+        };
+      }
+      async createOffer() { throw new Error("E2E realtime unavailable"); }
+      close() { this.connectionState = "closed"; }
+    }
+    Object.defineProperty(window, "RTCPeerConnection", { configurable: true, value: UnavailablePeerConnection });
+  }, options.disableRealtime ?? true);
 
   await page.route(`${apiBaseUrl}/api/auth/get-session`, (route) =>
     route.fulfill({
@@ -132,6 +157,38 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
       }),
     }),
   );
+  await page.route(`${apiBaseUrl}/v1/turn/credentials`, (route) =>
+    route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        iceServers: [{
+          urls: "turn:example.test:3478?transport=udp",
+          username: "temporary-turn-user",
+          credential: "temporary-turn-password",
+        }],
+      }),
+    }),
+  );
+  await page.route(`${apiBaseUrl}/v1/sfu/**`, (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/sessions/new")) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ sessionId: "e2e-sfu-session" }) });
+    }
+    if (pathname.endsWith("/datachannels/establish")) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          sessionDescription: { type: "answer", sdp: "e2e-sfu-answer" },
+          requiresImmediateRenegotiation: false,
+        }),
+      });
+    }
+    if (pathname.endsWith("/datachannels/new")) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ dataChannels: [{ id: 7 }] }) });
+    }
+    return route.fulfill({ contentType: "application/json", body: "{}" });
+  });
   await page.route(`${apiBaseUrl}/v1/r2/credentials`, async (route) => {
     if (options.r2CredentialDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.r2CredentialDelayMs));
@@ -156,8 +213,9 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     }).catch(() => undefined);
   });
   await page.route(`${apiBaseUrl}/v1/pickups`, async (route) => {
-    const body = await route.request().postDataJSON() as { offer: string };
+    const body = await route.request().postDataJSON() as { offer: string; variant: string };
     postedOffer = body.offer;
+    postedVariant = body.variant;
     await route.fulfill({
       status: 201,
       contentType: "application/json",
@@ -165,6 +223,34 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     });
   });
   await page.route(`${apiBaseUrl}/v1/pickups/**`, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/status")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ cancelled: false, expiresAt: Date.now() + 3_600_000 }),
+      });
+      return;
+    }
+    if (pathname.endsWith("/cancel")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ cancelled: true }) });
+      return;
+    }
+    if (/\/(answer|selection|winner)$/.test(pathname)) {
+      if (route.request().method() === "GET") {
+        if (pathname.endsWith("/answer")) {
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: null }) });
+          return;
+        }
+        if (pathname.endsWith("/selection") && options.pickupSelection) {
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify({ route: options.pickupSelection }) });
+          return;
+        }
+        await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "pending" }) });
+      } else {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+      }
+      return;
+    }
     const offer = options.pickupOffer ?? postedOffer;
     await route.fulfill({
       contentType: "application/json",
@@ -196,6 +282,7 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     getPostedOffer: () => postedOffer,
     getUploadedBody: () => uploadedBody,
     getUploadHeaders: () => uploadHeaders,
+    getPostedVariant: () => postedVariant,
   };
 }
 

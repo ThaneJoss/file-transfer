@@ -2,15 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { encodeConnectionPayload } from "./connectionCode";
 import {
+  decodeTransferAnswer,
   assertR2TransferDescriptor,
+  decodeTransferOffer,
   decodeTransferDescriptor,
+  encodeTransferAnswer,
   encodeTransferDescriptor,
+  encodeTransferOffer,
+  fileTransferAnswerKind,
   fileTransferProtocolKind,
+  legacyFileTransferProtocolKind,
 } from "./fileProtocol";
-import type { R2TransferDescriptor } from "./fileProtocol";
+import type { MultipathTransferAnswer, MultipathTransferOffer, R2TransferDescriptor } from "./fileProtocol";
 
 const descriptor: R2TransferDescriptor = {
-  kind: fileTransferProtocolKind,
+  kind: legacyFileTransferProtocolKind,
   createdAt: 1_700_000_000_000,
   file: {
     id: "123e4567-e89b-42d3-a456-426614174000",
@@ -28,10 +34,72 @@ const descriptor: R2TransferDescriptor = {
   },
 };
 
+const multipathOffer: MultipathTransferOffer = {
+  kind: fileTransferProtocolKind,
+  transferId: "123e4567-e89b-42d3-a456-426614174001",
+  mode: "auto",
+  createdAt: 1_700_000_000_000,
+  file: {
+    id: "123e4567-e89b-42d3-a456-426614174002",
+    name: "demo.bin",
+    size: 5,
+    type: "application/octet-stream",
+    lastModified: 123,
+    sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    chunkSize: 48 * 1024,
+    totalChunks: 1,
+  },
+  routes: [{
+    kind: "r2",
+    objectKey: "users/demo.bin",
+    downloadUrl: "https://example.r2.cloudflarestorage.com/bucket/demo.bin?X-Amz-Signature=test",
+    expiresAt: 1_800_000_000_000,
+    probeSize: 5,
+    probeSha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+  }],
+};
+
 describe("file transfer protocol", () => {
   it("round trips a v2 descriptor", async () => {
     const encoded = await encodeTransferDescriptor(descriptor);
     await expect(decodeTransferDescriptor(encoded)).resolves.toEqual(descriptor);
+  });
+
+  it("round trips a v3 multipath offer and answer", async () => {
+    await expect(decodeTransferOffer(await encodeTransferOffer(multipathOffer))).resolves.toEqual(multipathOffer);
+    const answer: MultipathTransferAnswer = {
+      kind: fileTransferAnswerKind,
+      transferId: multipathOffer.transferId,
+      routes: [{
+        kind: "sfu",
+        descriptor: {
+          kind: "cloudflare-calls-datachannel-duplex-answer-v2",
+          publisherSessionId: "receiver-session",
+          dataChannelName: "reverse-channel",
+        },
+      }],
+      metrics: { r2: { bytes: 5, elapsedMs: 12 } },
+    };
+    await expect(decodeTransferAnswer(await encodeTransferAnswer(answer))).resolves.toEqual(answer);
+  });
+
+  it("allows unavailable routes but rejects duplicate route identities", async () => {
+    await expect(decodeTransferOffer(await encodeTransferOffer(multipathOffer))).resolves.toMatchObject({ routes: [{ kind: "r2" }] });
+    const invalid = { ...multipathOffer, routes: [...multipathOffer.routes, multipathOffer.routes[0]] };
+    await expect(encodeTransferOffer(invalid)).rejects.toThrow("文件传输协议格式不正确");
+  });
+
+  it("rejects manifests whose frame sequence would exceed uint32", async () => {
+    const totalChunks = 0x1_0000_0001;
+    const invalid = {
+      ...multipathOffer,
+      file: {
+        ...multipathOffer.file,
+        size: totalChunks * multipathOffer.file.chunkSize,
+        totalChunks,
+      },
+    };
+    await expect(encodeTransferOffer(invalid)).rejects.toThrow("文件传输协议格式不正确");
   });
 
   it("normalizes a legacy R2 descriptor for size-only verification", async () => {

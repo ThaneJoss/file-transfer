@@ -1,156 +1,122 @@
 import { useCallback, useState } from "react";
 
+import type { TransferMethod, TransferMode } from "../protocol/fileProtocol";
+import { runMultipathSender } from "../services/multipathTransfer";
+import { cancelPickup } from "../services/pickupApi";
 import { isAbortError, useTransferLifecycle } from "./useTransferLifecycle";
 
-export type SenderPhase =
-  | "idle"
-  | "ready"
-  | "hashing"
-  | "authorizing"
-  | "uploading"
-  | "publishing"
-  | "complete"
-  | "cancelled"
-  | "error";
-
-const phaseMessage: Record<Exclude<SenderPhase, "idle" | "ready" | "complete" | "cancelled" | "error">, string> = {
-  hashing: "正在校验文件完整性...",
-  authorizing: "正在准备安全上传...",
-  uploading: "正在上传文件...",
-  publishing: "正在生成取件码...",
-};
+export type SenderPhase = "idle" | "ready" | "preparing" | "waiting" | "transferring" | "complete" | "cancelled" | "error";
 
 export function useFileSender() {
   const lifecycle = useTransferLifecycle();
   const [file, setFileState] = useState<File | null>(null);
+  const [mode, setModeState] = useState<TransferMode>("auto");
   const [phase, setPhase] = useState<SenderPhase>("idle");
-  const [status, setStatus] = useState("选择一个文件后开始上传。");
+  const [status, setStatus] = useState("选择一个文件后生成取件码。");
   const [error, setError] = useState("");
   const [progress, setProgress] = useState(0);
   const [pickupCode, setPickupCode] = useState("");
   const [pickupExpiresAt, setPickupExpiresAt] = useState<number | null>(null);
-  const [pendingProtocol, setPendingProtocol] = useState("");
+  const [winner, setWinner] = useState<TransferMethod | null>(null);
 
   const setFile = useCallback((nextFile: File | null) => {
     lifecycle.cancel("已选择新的文件。");
     setFileState(nextFile);
     setPhase(nextFile ? "ready" : "idle");
-    setStatus(nextFile ? `已选择 ${nextFile.name}，可以开始上传。` : "选择一个文件后开始上传。");
+    setStatus(nextFile ? `已选择 ${nextFile.name}，可以生成取件码。` : "选择一个文件后生成取件码。");
     setError("");
     setProgress(0);
     setPickupCode("");
     setPickupExpiresAt(null);
-    setPendingProtocol("");
+    setWinner(null);
   }, [lifecycle]);
 
-  const upload = useCallback(async () => {
+  const setMode = useCallback((nextMode: TransferMode) => {
+    setModeState(nextMode);
+    setStatus(nextMode === "turbo" ? "极速模式会同时使用五条线路，流量消耗更高。" : "智能模式会实测五条线路并选择预计最快的一条。");
+  }, []);
+
+  const start = useCallback(async () => {
     if (!file) {
       setError("请先选择一个文件。");
       return;
     }
     const selectedFile = file;
     const operation = lifecycle.start();
+    setPhase("preparing");
+    setStatus("正在准备文件和五条传输线路...");
     setError("");
+    setProgress(0);
     setPickupCode("");
     setPickupExpiresAt(null);
-    setPendingProtocol("");
-    setProgress(0);
-    let protocolWasReady = false;
-
+    setWinner(null);
+    let pickupWasCreated = false;
+    let createdPickupCode = "";
     try {
-      const service = await import("../services/r2Transfer");
-      if (!lifecycle.isCurrent(operation)) return;
-      const result = await service.uploadFile({
+      const result = await runMultipathSender({
         file: selectedFile,
+        mode,
         signal: operation.signal,
-        onPhase: (nextPhase) => {
-          if (!lifecycle.isCurrent(operation)) return;
-          setPhase(nextPhase);
-          setStatus(phaseMessage[nextPhase]);
-          if (nextPhase === "authorizing") setProgress((value) => Math.max(value, 20));
-          if (nextPhase === "publishing") setProgress((value) => Math.max(value, 96));
-        },
-        onHashProgress: (bytes, total) => {
-          if (!lifecycle.isCurrent(operation)) return;
-          setProgress(total === 0 ? 20 : Math.min(20, (bytes / total) * 20));
-        },
-        onUploadProgress: (bytes, total) => {
-          if (!lifecycle.isCurrent(operation)) return;
-          setProgress(total === 0 ? 95 : 20 + Math.min(75, (bytes / total) * 75));
-        },
-        onProtocolReady: (protocol) => {
-          if (!lifecycle.isCurrent(operation)) return;
-          protocolWasReady = true;
-          setPendingProtocol(protocol);
+        callbacks: {
+          onStatus: (message) => {
+            if (!lifecycle.isCurrent(operation)) return;
+            setStatus(message);
+            if (message.includes("等待接收方")) setPhase("waiting");
+            else if (message.includes("传输") || message.includes("测速") || message.includes("选择")) setPhase("transferring");
+          },
+          onHashProgress: (bytes, total) => {
+            if (!lifecycle.isCurrent(operation)) return;
+            setProgress(total === 0 ? 10 : Math.min(10, bytes / total * 10));
+          },
+          onProgress: (bytes, total) => {
+            if (!lifecycle.isCurrent(operation)) return;
+            const next = total === 0 ? 100 : Math.min(100, bytes / total * 100);
+            setProgress((current) => Math.max(current, next));
+          },
+          onPickup: (pickup) => {
+            if (!lifecycle.isCurrent(operation)) return;
+            pickupWasCreated = true;
+            createdPickupCode = pickup.code;
+            setPickupCode(pickup.code);
+            setPickupExpiresAt(pickup.expiresAt);
+            setPhase("waiting");
+          },
         },
       });
       if (!lifecycle.isCurrent(operation)) return;
-      setPendingProtocol(result.protocol);
-      setPickupCode(result.pickup.code);
-      setPickupExpiresAt(result.pickup.expiresAt);
+      setWinner(result.winner.route);
       setProgress(100);
       setPhase("complete");
-      setStatus("上传完成，取件码已生成。");
       lifecycle.finish(operation);
     } catch (caught) {
       if (!lifecycle.isCurrent(operation) || isAbortError(caught)) return;
+      if (createdPickupCode) void cancelPickup(createdPickupCode).catch(() => undefined);
       setPhase("error");
-      setError(caught instanceof Error ? caught.message : "上传失败，请重试。");
-      setStatus(protocolWasReady ? "文件已上传，但取件码生成失败。" : "上传没有完成。");
+      setPickupCode("");
+      setPickupExpiresAt(null);
+      setError(caught instanceof AggregateError
+        ? caught.errors.map((item) => item instanceof Error ? item.message : String(item)).join("；")
+        : caught instanceof Error ? caught.message : "文件传输失败，请重试。");
+      setStatus(pickupWasCreated ? "接收端没有完成文件校验。" : "取件码生成失败。");
       lifecycle.finish(operation);
     }
-  }, [file, lifecycle]);
-
-  const retryPickup = useCallback(async () => {
-    if (!pendingProtocol) return;
-    const operation = lifecycle.start();
-    setError("");
-    setPhase("publishing");
-    setStatus("正在重新生成取件码...");
-    setProgress(96);
-    try {
-      const { publishPickup } = await import("../services/r2Transfer");
-      const pickup = await publishPickup(pendingProtocol, operation.signal);
-      if (!lifecycle.isCurrent(operation)) return;
-      setPickupCode(pickup.code);
-      setPickupExpiresAt(pickup.expiresAt);
-      setProgress(100);
-      setPhase("complete");
-      setStatus("取件码已生成。");
-      lifecycle.finish(operation);
-    } catch (caught) {
-      if (!lifecycle.isCurrent(operation) || isAbortError(caught)) return;
-      setPhase("error");
-      setError(caught instanceof Error ? caught.message : "生成取件码失败。");
-      setStatus("文件已上传，但取件码生成失败。");
-      lifecycle.finish(operation);
-    }
-  }, [lifecycle, pendingProtocol]);
+  }, [file, lifecycle, mode]);
 
   const cancel = useCallback(() => {
-    lifecycle.cancel("上传已取消。");
+    if (pickupCode) void cancelPickup(pickupCode).catch(() => undefined);
+    lifecycle.cancel("传输已取消。");
     setPhase("cancelled");
-    setStatus("上传已取消，可以重新开始。");
+    setPickupCode("");
+    setPickupExpiresAt(null);
+    setStatus("传输已取消，可以重新开始。");
     setError("");
-  }, [lifecycle]);
+  }, [lifecycle, pickupCode]);
 
   const reset = useCallback(() => setFile(null), [setFile]);
-  const busy = phase === "hashing" || phase === "authorizing" || phase === "uploading" || phase === "publishing";
+  const busy = phase === "preparing" || phase === "waiting" || phase === "transferring";
 
   return {
-    file,
-    phase,
-    status,
-    error,
-    progress,
-    pickupCode,
-    pickupExpiresAt,
-    canRetryPickup: phase === "error" && Boolean(pendingProtocol),
-    busy,
-    setFile,
-    upload,
-    retryPickup,
-    cancel,
-    reset,
+    file, mode, phase, status, error, progress, pickupCode, pickupExpiresAt,
+    winner, busy, setFile, setMode, start, cancel, reset,
   };
 }

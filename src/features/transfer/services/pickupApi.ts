@@ -1,6 +1,7 @@
-import { apiJson, apiRequest, notifyApiUsageChanged } from "../../../lib/api/client";
+import { ApiError, apiJson, apiRequest, notifyApiUsageChanged } from "../../../lib/api/client";
+import type { TransferMethod } from "../protocol/fileProtocol";
 
-export type PickupVariant = "direct" | "stun" | "turn" | "sfu" | "r2";
+export type PickupVariant = TransferMethod | "multipath";
 export type PickupPayload = {
   status: "found";
   variant: PickupVariant;
@@ -9,9 +10,24 @@ export type PickupPayload = {
   answered: boolean;
 };
 
-export async function createPickup(offer: string, signal?: AbortSignal) {
+export type PickupWinner = {
+  route: TransferMethod;
+  bytes: number;
+  sha256: string;
+};
+
+export type PickupStatus = {
+  cancelled: boolean;
+  expiresAt: number;
+};
+
+export async function createPickup(
+  offer: string,
+  signal?: AbortSignal,
+  variant: PickupVariant = "multipath",
+) {
   const result = await apiJson<{ code: string; expiresAt: number }>("/v1/pickups", "POST", {
-    variant: "r2",
+    variant,
     offer,
   }, { signal });
   notifyApiUsageChanged();
@@ -19,7 +35,210 @@ export async function createPickup(offer: string, signal?: AbortSignal) {
 }
 
 export async function getPickup(code: string, signal?: AbortSignal) {
-  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, { cache: "no-store", signal });
+  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, {
+    cache: "no-store",
+    signal,
+  });
   notifyApiUsageChanged();
   return result;
+}
+
+export async function submitPickupAnswer(code: string, answer: string, signal?: AbortSignal) {
+  const result = await apiJson<{ accepted: true }>(
+    `/v1/pickups/${encodeURIComponent(code)}/answer`,
+    "PUT",
+    { answer },
+    { signal },
+  );
+  notifyApiUsageChanged();
+  return result;
+}
+
+export async function getPickupAnswer(code: string, signal?: AbortSignal) {
+  const result = await apiRequest<{ answer: string | null }>(
+    `/v1/pickups/${encodeURIComponent(code)}/answer`,
+    { cache: "no-store", signal },
+  );
+  return result.answer;
+}
+
+export async function setPickupSelection(code: string, route: TransferMethod, signal?: AbortSignal) {
+  return apiJson<{ accepted: true }>(
+    `/v1/pickups/${encodeURIComponent(code)}/selection`,
+    "PUT",
+    { route },
+    { signal },
+  );
+}
+
+export async function getPickupSelection(code: string, signal?: AbortSignal) {
+  const result = await apiRequest<{ route: unknown }>(
+    `/v1/pickups/${encodeURIComponent(code)}/selection`,
+    { cache: "no-store", signal },
+  );
+  if (!isTransferMethod(result.route)) throw new Error("取件线路响应格式不正确。");
+  return { route: result.route };
+}
+
+export async function setPickupWinner(code: string, winner: PickupWinner, signal?: AbortSignal) {
+  return apiJson<{ accepted: true }>(
+    `/v1/pickups/${encodeURIComponent(code)}/winner`,
+    "PUT",
+    winner,
+    { signal },
+  );
+}
+
+export async function getPickupWinner(code: string, signal?: AbortSignal) {
+  const result = await apiRequest<Partial<PickupWinner>>(
+    `/v1/pickups/${encodeURIComponent(code)}/winner`,
+    { cache: "no-store", signal },
+  );
+  if (
+    !isTransferMethod(result.route) ||
+    !Number.isSafeInteger(result.bytes) || (result.bytes as number) < 0 ||
+    typeof result.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(result.sha256)
+  ) throw new Error("取件胜者响应格式不正确。");
+  return { route: result.route, bytes: result.bytes as number, sha256: result.sha256.toLowerCase() };
+}
+
+export async function cancelPickup(code: string, signal?: AbortSignal) {
+  return apiJson<{ cancelled: true }>(
+    `/v1/pickups/${encodeURIComponent(code)}/cancel`,
+    "PUT",
+    {},
+    { signal },
+  );
+}
+
+export async function getPickupStatus(code: string, signal?: AbortSignal): Promise<PickupStatus> {
+  const result = await apiRequest<Partial<PickupStatus>>(
+    `/v1/pickups/${encodeURIComponent(code)}/status`,
+    { cache: "no-store", signal },
+  );
+  if (typeof result.cancelled !== "boolean" || !Number.isSafeInteger(result.expiresAt) || (result.expiresAt as number) <= 0) {
+    throw new Error("取件状态响应格式不正确。");
+  }
+  return { cancelled: result.cancelled, expiresAt: result.expiresAt as number };
+}
+
+export async function pollPickupAnswer(code: string, signal: AbortSignal, expiresAt?: number) {
+  return pollPending(() => getPickupAnswer(code, signal), signal, expiresAt);
+}
+
+export async function pollPickupSelection(code: string, signal: AbortSignal, expiresAt?: number) {
+  return pollPending(() => pending404(() => getPickupSelection(code, signal)), signal, expiresAt);
+}
+
+export async function pollPickupWinner(code: string, signal: AbortSignal, expiresAt?: number) {
+  return pollPending(() => pending404(() => getPickupWinner(code, signal)), signal, expiresAt);
+}
+
+export async function watchPickupSelections(
+  code: string,
+  signal: AbortSignal,
+  expiresAt: number,
+  onSelection: (selection: { route: TransferMethod }) => void | Promise<void>,
+): Promise<never> {
+  let previous: TransferMethod | null = null;
+  while (true) {
+    if (signal.aborted) throw abortReason(signal);
+    if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
+    const selection = await readCoordinationRetryable(() => pending404(() => getPickupSelection(code, signal)));
+    if (selection && selection.route !== previous) {
+      previous = selection.route;
+      await onSelection(selection);
+    }
+    await abortableDelay(850, signal);
+  }
+}
+
+export async function monitorPickupCancellation(
+  code: string,
+  signal: AbortSignal,
+  expiresAt: number,
+): Promise<never> {
+  while (true) {
+    if (signal.aborted) throw abortReason(signal);
+    if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
+    const status = await readCoordinationRetryable(() => getPickupStatus(code, signal));
+    if (status?.cancelled) throw new Error("另一端已取消传输。");
+    await abortableDelay(850, signal);
+  }
+}
+
+async function pollPending<T>(
+  read: () => Promise<T | null>,
+  signal: AbortSignal,
+  expiresAt = Number.POSITIVE_INFINITY,
+  intervalMs = 850,
+): Promise<T> {
+  while (true) {
+    if (signal.aborted) throw abortReason(signal);
+    if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
+    const value = await readCoordinationRetryable(read);
+    if (value !== null) return value;
+    await abortableDelay(intervalMs, signal);
+  }
+}
+
+async function readCoordination<T>(read: () => Promise<T>) {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 410) {
+      throw new Error("另一端已取消传输。", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function readCoordinationRetryable<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await readCoordination(read);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 408 || error.status === 429 || error.status >= 500)) return null;
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
+}
+
+async function pending404<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read();
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    const body = error.body && typeof error.body === "object" ? error.body as { error?: unknown } : null;
+    const message = typeof body?.error === "string" ? body.error.toLowerCase() : "";
+    if (message.includes("not found") || message.includes("expired")) throw error;
+    return null;
+  }
+}
+
+function abortableDelay(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const timeout = window.setTimeout(done, milliseconds);
+    function done() {
+      signal.removeEventListener("abort", cancelled);
+      resolve();
+    }
+    function cancelled() {
+      window.clearTimeout(timeout);
+      signal.removeEventListener("abort", cancelled);
+      reject(abortReason(signal));
+    }
+    signal.addEventListener("abort", cancelled, { once: true });
+  });
+}
+
+function abortReason(signal: AbortSignal) {
+  return signal.reason instanceof Error ? signal.reason : new DOMException("操作已取消。", "AbortError");
+}
+
+function isTransferMethod(value: unknown): value is TransferMethod {
+  return value === "direct" || value === "stun" || value === "turn" || value === "sfu" || value === "r2";
 }
