@@ -157,6 +157,38 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
       }),
     }),
   );
+  await page.route(`${apiBaseUrl}/v1/turn/credentials`, (route) =>
+    route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        iceServers: [{
+          urls: "turn:example.test:3478?transport=udp",
+          username: "temporary-turn-user",
+          credential: "temporary-turn-password",
+        }],
+      }),
+    }),
+  );
+  await page.route(`${apiBaseUrl}/v1/sfu/**`, (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/sessions/new")) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ sessionId: "e2e-sfu-session" }) });
+    }
+    if (pathname.endsWith("/datachannels/establish")) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          sessionDescription: { type: "answer", sdp: "e2e-sfu-answer" },
+          requiresImmediateRenegotiation: false,
+        }),
+      });
+    }
+    if (pathname.endsWith("/datachannels/new")) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ dataChannels: [{ id: 7 }] }) });
+    }
+    return route.fulfill({ contentType: "application/json", body: "{}" });
+  });
   await page.route(`${apiBaseUrl}/v1/r2/credentials`, async (route) => {
     if (options.r2CredentialDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.r2CredentialDelayMs));
@@ -205,6 +237,10 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     }
     if (/\/(answer|selection|winner)$/.test(pathname)) {
       if (route.request().method() === "GET") {
+        if (pathname.endsWith("/answer")) {
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: null }) });
+          return;
+        }
         if (pathname.endsWith("/selection") && options.pickupSelection) {
           await route.fulfill({ contentType: "application/json", body: JSON.stringify({ route: options.pickupSelection }) });
           return;

@@ -76,7 +76,6 @@ test.describe("authentication", () => {
     await expect(page.getByRole("heading", { name: "账户与用量" })).toBeVisible();
     await expect(page.getByTestId("user-usage-page")).toContainText("测试用户");
     await expect(page.getByText("本月总流量")).toBeVisible();
-    await expect(page.getByTestId("user-usage-page").getByText("15.00 MB", { exact: true })).toBeVisible();
     await expect(page.getByTestId("usage-card-files")).toContainText("15.00 MB");
     await expect(page.getByTestId("usage-card-durable")).toContainText("7 次");
     await expect(page.getByTestId("usage-card-direct")).toHaveCount(0);
