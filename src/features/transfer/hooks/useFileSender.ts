@@ -61,7 +61,10 @@ export function useFileSender() {
           onStatus: (message) => {
             if (!lifecycle.isCurrent(operation)) return;
             setStatus(message);
-            if (message.includes("等待接收方")) setPhase("waiting");
+            if (message.includes("等待接收方")) {
+              setPhase("waiting");
+              setProgress(0);
+            }
             else if (message.includes("传输") || message.includes("测速") || message.includes("选择")) setPhase("transferring");
           },
           onHashProgress: (bytes, total) => {
@@ -79,7 +82,6 @@ export function useFileSender() {
             createdPickupCode = pickup.code;
             setPickupCode(pickup.code);
             setPickupExpiresAt(pickup.expiresAt);
-            setPhase("waiting");
           },
         },
       });
@@ -97,7 +99,7 @@ export function useFileSender() {
       setError(caught instanceof AggregateError
         ? caught.errors.map((item) => item instanceof Error ? item.message : String(item)).join("；")
         : caught instanceof Error ? caught.message : "文件传输失败，请重试。");
-      setStatus(pickupWasCreated ? "接收端没有完成文件校验。" : "取件码生成失败。");
+      setStatus(pickupWasCreated ? "传输未完成，取件码已作废。" : "取件码生成失败。");
       lifecycle.finish(operation);
     }
   }, [file, lifecycle, mode]);

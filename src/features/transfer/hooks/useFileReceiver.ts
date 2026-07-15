@@ -31,7 +31,9 @@ export function useFileReceiver() {
     setPreparedPickup(null);
     setError("");
     setStatus("正在读取取件码中的文件信息...");
-    void inspectPickupFile(code, controller.signal).then(({ pickup, file, mode }) => {
+    void inspectPickupFile(code, controller.signal, () => {
+      if (!controller.signal.aborted) setStatus("取件码已生成，发送端正在准备文件和线路...");
+    }).then(({ pickup, file, mode }) => {
       if (controller.signal.aborted) return;
       setPreparedPickup(pickup);
       setDescriptor(file);

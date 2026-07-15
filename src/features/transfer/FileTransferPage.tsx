@@ -241,8 +241,8 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
         </div>
       )}
 
-      {(sender.busy || sender.progress > 0) && (
-        <ProgressCard label={sender.pickupCode ? "传输进度" : "准备进度"} progress={sender.progress} testId="upload-progress" />
+      {((sender.busy && sender.phase !== "waiting") || sender.progress > 0) && (
+        <ProgressCard label={sender.phase === "transferring" ? "传输进度" : "准备进度"} progress={sender.progress} testId="upload-progress" />
       )}
 
       {sender.pickupCode && (
@@ -259,7 +259,11 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
               {sender.pickupExpiresAt ? `有效至 ${new Date(sender.pickupExpiresAt).toLocaleString("zh-CN")}` : "一小时内有效"}
             </p>
             <p className="mt-1 text-sm font-bold text-[#47725c]">
-              {sender.phase === "complete" ? `${sender.winner?.toUpperCase() ?? "最快线路"} 已完成校验` : "请保持此页面打开，等待接收方加入"}
+              {sender.phase === "complete"
+                ? `${sender.winner?.toUpperCase() ?? "最快线路"} 已完成校验`
+                : sender.phase === "preparing"
+                  ? "取件码可立即分享，文件校验和线路正在后台准备"
+                  : "请保持此页面打开，等待接收方加入"}
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-3">

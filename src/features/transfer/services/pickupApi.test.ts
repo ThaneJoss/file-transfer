@@ -11,6 +11,9 @@ import {
   getPickupStatus,
   monitorPickupCancellation,
   pollPickupSelection,
+  publishPickupOffer,
+  reservePickup,
+  waitForPickupOffer,
 } from "./pickupApi";
 
 describe("pickup API service", () => {
@@ -41,6 +44,42 @@ describe("pickup API service", () => {
       ),
     );
     await expect(getPickupAnswer("12345678")).resolves.toBeNull();
+  });
+
+  it("reserves a code immediately, publishes its offer, and waits through pending state", async () => {
+    let lookups = 0;
+    const onPending = vi.fn();
+    server.use(
+      http.post("https://api.file.thanejoss.com/v1/pickups", async ({ request }) => {
+        expect(await request.json()).toEqual({ variant: "multipath" });
+        return HttpResponse.json({ code: "12345678", expiresAt: Date.now() + 60_000 }, { status: 201 });
+      }),
+      http.put("https://api.file.thanejoss.com/v1/pickups/12345678/offer", async ({ request }) => {
+        expect(await request.json()).toEqual({ offer: "ready-offer" });
+        return HttpResponse.json({ accepted: true });
+      }),
+      http.get("https://api.file.thanejoss.com/v1/pickups/12345678", () => {
+        lookups += 1;
+        return lookups === 1
+          ? HttpResponse.json({ status: "pending", variant: "multipath", expiresAt: Date.now() + 60_000 }, { status: 202 })
+          : HttpResponse.json({
+              status: "found",
+              variant: "multipath",
+              offer: "ready-offer",
+              expiresAt: Date.now() + 60_000,
+              answered: false,
+            });
+      }),
+    );
+
+    await expect(reservePickup()).resolves.toMatchObject({ code: "12345678" });
+    await expect(publishPickupOffer("12345678", "ready-offer")).resolves.toEqual({ accepted: true });
+    await expect(waitForPickupOffer("12345678", undefined, { onPending, intervalMs: 0 })).resolves.toMatchObject({
+      status: "found",
+      offer: "ready-offer",
+    });
+    expect(onPending).toHaveBeenCalledOnce();
+    expect(lookups).toBe(2);
   });
 
   it("stops coordination polling when the pickup deadline has passed", async () => {
