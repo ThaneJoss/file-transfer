@@ -6,10 +6,10 @@ import {
   receiveVerifiedResponse,
 } from "../protocol/fileStream";
 import type { ReceiveTarget } from "../protocol/fileStream";
-import { getPickup } from "./pickupApi";
+import { waitForPickupOffer } from "./pickupApi";
 
 export async function resolvePickupProtocol(code: string, signal?: AbortSignal) {
-  const pickup = await getPickup(code, signal);
+  const pickup = await waitForPickupOffer(code, signal);
   if (Date.now() >= pickup.expiresAt) {
     throw new Error("这个取件码已经过期，请让发送方重新上传。");
   }

@@ -71,7 +71,7 @@ test.describe("unified file transfer", () => {
   });
 
   test("generates a multipath pickup before uploading the file body", async ({ page }) => {
-    const mocks = await installAppMocks(page);
+    const mocks = await installAppMocks(page, { holdR2Credentials: true });
     await page.goto("/");
 
     await expect(page.getByTestId("transfer-method-selector")).toHaveCount(0);
@@ -80,6 +80,9 @@ test.describe("unified file transfer", () => {
     await expect(page.getByTestId("pickup-code")).toHaveText("12345678");
 
     expect(mocks.getPostedVariant()).toBe("multipath");
+    expect(mocks.getPostedOffer()).toBe("");
+    mocks.releaseR2Credentials();
+    await expect.poll(mocks.getPostedOffer).not.toBe("");
     expect(mocks.getUploadedBody()?.toString()).not.toBe("hello");
     expect(mocks.getUploadHeaders().authorization).toContain("Credential=temporary-access-key/");
 

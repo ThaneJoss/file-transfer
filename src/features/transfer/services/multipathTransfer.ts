@@ -54,14 +54,15 @@ import {
 } from "./channelTransfer";
 import type { ProbeResult, RouteChannel } from "./channelTransfer";
 import {
-  createPickup,
-  getPickup,
   monitorPickupCancellation,
   pollPickupAnswer,
   pollPickupWinner,
+  publishPickupOffer,
+  reservePickup,
   setPickupSelection,
   setPickupWinner,
   submitPickupAnswer,
+  waitForPickupOffer,
   watchPickupSelections,
 } from "./pickupApi";
 import type { PickupPayload } from "./pickupApi";
@@ -76,7 +77,7 @@ import { reportVerifiedTransferUsage } from "./transferUsage";
 import { downloadFile as downloadLegacyR2 } from "./transferRouter";
 
 export const multipathChunkSize = 48 * 1024;
-const routePreparationTimeoutMs = 15_000;
+const routePreparationTimeoutMs = 5_000;
 const winnerRecoveryTimeoutMs = 3_000;
 
 export type RouteState = "preparing" | "ready" | "probing" | "selected" | "transferring" | "complete" | "failed";
@@ -90,7 +91,7 @@ type CommonCallbacks = {
 
 export type SenderCallbacks = CommonCallbacks & {
   onHashProgress?: (bytes: number, total: number) => void;
-  onPickup?: (pickup: { code: string; expiresAt: number }, offer: MultipathTransferOffer) => void;
+  onPickup?: (pickup: { code: string; expiresAt: number }) => void;
 };
 
 export type ReceiverCallbacks = CommonCallbacks & {
@@ -118,14 +119,19 @@ export async function runMultipathSender({
   let r2Session: R2SenderSession | null = null;
 
   try {
-    callbacks.onStatus?.("正在计算文件 SHA-256...");
-    const sha256 = await sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
+    callbacks.onStatus?.("正在生成取件码...");
+    const pickup = await reservePickup(signal, "multipath");
+    callbacks.onPickup?.(pickup);
+    callbacks.onStatus?.("取件码已生成，正在后台校验文件并准备线路...");
     throwIfAborted(signal);
+
     const transferId = crypto.randomUUID();
     const totalChunks = file.size === 0 ? 0 : Math.ceil(file.size / multipathChunkSize);
 
     for (const route of ["direct", "stun", "turn", "sfu", "r2"] as const) setRoute(route, "preparing");
-    callbacks.onStatus?.("正在并行准备五条传输线路...");
+    callbacks.onStatus?.("正在并行校验文件并准备五条传输线路...");
+
+    const hashPromise = sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
 
     const prepareWebRtc = (route: "direct" | "stun" | "turn") => withRouteDeadline(
       signal,
@@ -169,9 +175,13 @@ export async function runMultipathSender({
       return session;
     });
 
-    const [directResult, stunResult, turnResult, sfuResult, r2Result] = await Promise.all([
-      settle(directOfferPromise), settle(stunOfferPromise), settle(turnPromise), settle(sfuPromise), settle(r2Promise),
+    const [hashResult, directResult, stunResult, turnResult, sfuResult, r2Result] = await Promise.all([
+      settle(hashPromise), settle(directOfferPromise), settle(stunOfferPromise), settle(turnPromise),
+      settle(sfuPromise), settle(r2Promise),
     ]);
+    if (!hashResult.ok) throw hashResult.error;
+    const sha256 = hashResult.value;
+    throwIfAborted(signal);
     const preparationErrors: Error[] = [];
     const preparedWebRtc: Array<{ session: WebRtcSenderSession; offer: WebRtcSignal }> = [];
     const routeOffers: TransferRouteOffer[] = [];
@@ -222,11 +232,10 @@ export async function runMultipathSender({
       routes: routeOffers,
     };
 
-    callbacks.onStatus?.(`五路准备完成，${routeOffers.length} 条线路可用，正在生成取件码...`);
+    callbacks.onStatus?.(`线路准备完成，${routeOffers.length} 条线路可用，正在发布线路信息...`);
     const encodedOffer = await encodeTransferOffer(offer);
-    const pickup = await createPickup(encodedOffer, signal, "multipath");
-    callbacks.onPickup?.(pickup, offer);
-    callbacks.onStatus?.("取件码已生成，等待接收方加入...");
+    await publishPickupOffer(pickup.code, encodedOffer, signal);
+    callbacks.onStatus?.("文件和线路已就绪，等待接收方加入...");
 
     const encodedAnswer = await pollPickupAnswer(pickup.code, signal, pickup.expiresAt);
     const answer = await decodeTransferAnswer(encodedAnswer);
@@ -424,7 +433,9 @@ export async function runMultipathReceiver({
   callbacks?: ReceiverCallbacks;
 }) {
   callbacks.onStatus?.("正在读取取件码...");
-  const pickup = preparedPickup ?? await getPickup(code, signal);
+  const pickup = preparedPickup ?? await waitForPickupOffer(code, signal, {
+    onPending: () => callbacks.onStatus?.("取件码已生成，发送端仍在准备文件和线路..."),
+  });
   if (Date.now() >= pickup.expiresAt) throw new Error("这个取件码已经过期，请让发送方重新生成。");
 
   if (pickup.variant === "r2") {
@@ -649,8 +660,12 @@ export async function runMultipathReceiver({
   }
 }
 
-export async function inspectPickupFile(code: string, signal?: AbortSignal) {
-  const pickup = await getPickup(code, signal);
+export async function inspectPickupFile(
+  code: string,
+  signal?: AbortSignal,
+  onPending?: () => void,
+) {
+  const pickup = await waitForPickupOffer(code, signal, { onPending });
   if (Date.now() >= pickup.expiresAt) throw new Error("这个取件码已经过期，请让发送方重新生成。");
   if (pickup.variant === "r2") {
     const descriptor = await decodeTransferDescriptor(pickup.offer);

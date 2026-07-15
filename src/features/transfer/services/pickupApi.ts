@@ -10,6 +10,14 @@ export type PickupPayload = {
   answered: boolean;
 };
 
+export type PendingPickupPayload = {
+  status: "pending";
+  variant: PickupVariant;
+  expiresAt: number;
+};
+
+export type PickupLookupPayload = PickupPayload | PendingPickupPayload;
+
 export type PickupWinner = {
   route: TransferMethod;
   bytes: number;
@@ -34,13 +42,60 @@ export async function createPickup(
   return result;
 }
 
-export async function getPickup(code: string, signal?: AbortSignal) {
-  const result = await apiRequest<PickupPayload>(`/v1/pickups/${encodeURIComponent(code)}`, {
+export async function reservePickup(
+  signal?: AbortSignal,
+  variant: PickupVariant = "multipath",
+) {
+  const result = await apiJson<{ code: string; expiresAt: number }>("/v1/pickups", "POST", {
+    variant,
+  }, { signal });
+  notifyApiUsageChanged();
+  return result;
+}
+
+export async function publishPickupOffer(code: string, offer: string, signal?: AbortSignal) {
+  const result = await apiJson<{ accepted: true }>(
+    `/v1/pickups/${encodeURIComponent(code)}/offer`,
+    "PUT",
+    { offer },
+    { signal },
+  );
+  notifyApiUsageChanged();
+  return result;
+}
+
+export async function getPickup(code: string, signal?: AbortSignal, waitMs = 0) {
+  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
+  const result = await apiRequest<PickupLookupPayload>(`/v1/pickups/${encodeURIComponent(code)}${waitQuery}`, {
     cache: "no-store",
     signal,
   });
-  notifyApiUsageChanged();
+  if (result.status === "found") notifyApiUsageChanged();
   return result;
+}
+
+export async function waitForPickupOffer(
+  code: string,
+  signal?: AbortSignal,
+  options: {
+    onPending?: (pickup: PendingPickupPayload) => void;
+    intervalMs?: number;
+    waitMs?: number;
+  } = {},
+) {
+  const activeSignal = signal ?? new AbortController().signal;
+  let expiresAt = Number.POSITIVE_INFINITY;
+  while (true) {
+    if (activeSignal.aborted) throw abortReason(activeSignal);
+    if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
+    const pickup = await readCoordinationRetryable(() => getPickup(code, activeSignal, options.waitMs ?? 20_000));
+    if (pickup?.status === "found") return pickup;
+    if (pickup?.status === "pending") {
+      expiresAt = pickup.expiresAt;
+      options.onPending?.(pickup);
+    }
+    await abortableDelay(options.intervalMs ?? 250, activeSignal);
+  }
 }
 
 export async function submitPickupAnswer(code: string, answer: string, signal?: AbortSignal) {

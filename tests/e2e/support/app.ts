@@ -76,6 +76,7 @@ export type AppMockOptions = {
   downloadBody?: string | Uint8Array;
   r2FailureStatus?: number;
   r2CredentialDelayMs?: number;
+  holdR2Credentials?: boolean;
   disableRealtime?: boolean;
   pickupSelection?: "direct" | "stun" | "turn" | "sfu" | "r2";
 };
@@ -85,6 +86,10 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   let uploadedBody: Buffer | null = null;
   let uploadHeaders: Record<string, string> = {};
   let postedVariant = "";
+  let releaseR2Credentials: () => void = () => undefined;
+  const r2CredentialGate = new Promise<void>((resolve) => {
+    releaseR2Credentials = resolve;
+  });
 
   await page.addInitScript(() => {
     window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 } };
@@ -190,6 +195,7 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     return route.fulfill({ contentType: "application/json", body: "{}" });
   });
   await page.route(`${apiBaseUrl}/v1/r2/credentials`, async (route) => {
+    if (options.holdR2Credentials) await r2CredentialGate;
     if (options.r2CredentialDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, options.r2CredentialDelayMs));
     }
@@ -213,8 +219,8 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     }).catch(() => undefined);
   });
   await page.route(`${apiBaseUrl}/v1/pickups`, async (route) => {
-    const body = await route.request().postDataJSON() as { offer: string; variant: string };
-    postedOffer = body.offer;
+    const body = await route.request().postDataJSON() as { offer?: string; variant: string };
+    postedOffer = body.offer ?? "";
     postedVariant = body.variant;
     await route.fulfill({
       status: 201,
@@ -224,6 +230,12 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   });
   await page.route(`${apiBaseUrl}/v1/pickups/**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/offer")) {
+      const body = await route.request().postDataJSON() as { offer: string };
+      postedOffer = body.offer;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+      return;
+    }
     if (pathname.endsWith("/status")) {
       await route.fulfill({
         contentType: "application/json",
@@ -252,6 +264,18 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
       return;
     }
     const offer = options.pickupOffer ?? postedOffer;
+    if (!offer) {
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "pending",
+          variant: options.pickupVariant ?? (postedVariant || "multipath"),
+          expiresAt: Date.now() + 3_600_000,
+        }),
+      });
+      return;
+    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -283,6 +307,7 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
     getUploadedBody: () => uploadedBody,
     getUploadHeaders: () => uploadHeaders,
     getPostedVariant: () => postedVariant,
+    releaseR2Credentials,
   };
 }
 
