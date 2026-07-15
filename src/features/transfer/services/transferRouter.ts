@@ -2,10 +2,8 @@ import { saveBlob } from "../../../lib/browser/download";
 import { decodeTransferDescriptor } from "../protocol/fileProtocol";
 import type { R2TransferDescriptor } from "../protocol/fileProtocol";
 import {
-  memoryReceiveLimitBytes,
-  pickFileSystemReceiveTarget,
+  chooseReceiveTargetForFile,
   receiveVerifiedResponse,
-  supportsFileSystemReceive,
 } from "../protocol/fileStream";
 import type { ReceiveTarget } from "../protocol/fileStream";
 import { getPickup } from "./pickupApi";
@@ -23,15 +21,7 @@ export async function resolvePickupProtocol(code: string, signal?: AbortSignal) 
 }
 
 export async function chooseReceiveTarget(descriptor: R2TransferDescriptor): Promise<ReceiveTarget> {
-  if (supportsFileSystemReceive()) {
-    return pickFileSystemReceiveTarget(descriptor.file.name);
-  }
-  if (descriptor.file.size > memoryReceiveLimitBytes) {
-    throw new Error(
-      "当前浏览器无法流式保存这个大文件。请使用最新版 Chrome 或 Edge，或让发送方选择不超过 128 MB 的文件。",
-    );
-  }
-  return { kind: "memory" };
+  return chooseReceiveTargetForFile(descriptor.file);
 }
 
 export async function downloadFile({

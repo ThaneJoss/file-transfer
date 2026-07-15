@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ShieldCheck,
   UploadCloud,
+  Zap,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -55,7 +56,7 @@ export function FileTransferPage() {
             <div>
               <h1 className="text-2xl font-black text-[#061b3a]">登录后上传或下载文件</h1>
               <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#526c92]">
-                文件不会经过应用服务器。上传完成后会得到一个 8 位取件码，接收方输入取件码即可下载。
+                生成取件码后，系统会在 Direct、STUN、TURN、SFU 和 R2 中自动选择最快线路。
               </p>
               {sessionError && <p className="mt-3 text-sm font-bold text-[#b4232b]" role="alert">{sessionError}</p>}
             </div>
@@ -86,7 +87,7 @@ export function FileTransferPage() {
         <div>
           <h1 className="text-[clamp(24px,4vw,34px)] font-black tracking-[-0.025em] text-[#061b3a]">传文件，只需要一个取件码</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#526c92] sm:text-base">
-            上传后分享 8 位数字；下载时会自动校验文件大小和 SHA-256，具体存储路径由传输协议处理。
+            选择文件先生成 8 位取件码；对方输入后自动测速并开始传输，完成时校验文件大小和 SHA-256。
           </p>
         </div>
         <span className="hidden size-16 place-items-center rounded-2xl bg-[#1677ff] text-white sm:grid">
@@ -163,8 +164,41 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
     <Panel className="grid gap-5 p-5 sm:p-7" testId="upload-panel">
       <div>
         <h2 className="text-2xl font-black text-[#061b3a]">上传文件</h2>
-        <p className="mt-1 text-sm text-[#526c92]">选择文件并等待上传完成，然后把取件码发给接收方。</p>
+        <p className="mt-1 text-sm text-[#526c92]">选择文件并生成取件码；接收方加入前不会发送文件正文。</p>
       </div>
+
+      {!sender.pickupCode && (
+        <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#edf3fb] p-1.5" aria-label="传输模式">
+          <button
+            className={`rounded-lg px-3 py-3 text-sm font-extrabold ${sender.mode === "auto" ? "bg-white text-[#1677ff] shadow-sm" : "text-[#526c92]"}`}
+            type="button"
+            aria-pressed={sender.mode === "auto"}
+            disabled={sender.busy}
+            onClick={() => sender.setMode("auto")}
+            data-testid="transfer-speed-auto"
+          >
+            智能模式
+            <span className="mt-0.5 block text-xs font-medium">实测后选择最快线路</span>
+          </button>
+          <button
+            className={`rounded-lg px-3 py-3 text-sm font-extrabold ${sender.mode === "turbo" ? "bg-white text-[#d85c00] shadow-sm" : "text-[#526c92]"}`}
+            type="button"
+            aria-pressed={sender.mode === "turbo"}
+            disabled={sender.busy}
+            onClick={() => sender.setMode("turbo")}
+            data-testid="transfer-speed-turbo"
+          >
+            极速模式
+            <span className="mt-0.5 block text-xs font-medium">五条线路同时传输</span>
+          </button>
+        </div>
+      )}
+
+      {sender.mode === "turbo" && !sender.pickupCode && (
+        <p className="rounded-xl bg-[#fff5e8] px-4 py-3 text-sm text-[#9a4a09]">
+          极速模式会同时使用五条线路，速度优先，也会消耗更多网络流量。
+        </p>
+      )}
 
       {!sender.pickupCode && (
         <div
@@ -207,14 +241,14 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
         </div>
       )}
 
-      {(sender.busy || sender.progress > 0) && !sender.pickupCode && (
-        <ProgressCard label="上传进度" progress={sender.progress} testId="upload-progress" />
+      {(sender.busy || sender.progress > 0) && (
+        <ProgressCard label={sender.pickupCode ? "传输进度" : "准备进度"} progress={sender.progress} testId="upload-progress" />
       )}
 
       {sender.pickupCode && (
         <div className="grid gap-5 rounded-2xl border border-[#9fd2b8] bg-[#f0fbf5] p-6 text-center" data-testid="upload-complete">
           <span className="mx-auto grid size-12 place-items-center rounded-full bg-[#23a26d] text-white">
-            <CheckCircle2 aria-hidden="true" size={26} />
+            {sender.phase === "complete" ? <CheckCircle2 aria-hidden="true" size={26} /> : <Zap aria-hidden="true" size={26} />}
           </span>
           <div>
             <div className="text-sm font-extrabold text-[#3d6b54]">8 位取件码</div>
@@ -224,32 +258,31 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
             <p className="mt-2 text-sm text-[#47725c]">
               {sender.pickupExpiresAt ? `有效至 ${new Date(sender.pickupExpiresAt).toLocaleString("zh-CN")}` : "一小时内有效"}
             </p>
+            <p className="mt-1 text-sm font-bold text-[#47725c]">
+              {sender.phase === "complete" ? `${sender.winner?.toUpperCase() ?? "最快线路"} 已完成校验` : "请保持此页面打开，等待接收方加入"}
+            </p>
           </div>
           <div className="flex flex-wrap justify-center gap-3">
             <PrimaryButton onClick={() => void copyPickupCode()}>
               <Copy aria-hidden="true" size={17} />
               复制取件码
             </PrimaryButton>
-            <SecondaryButton onClick={reset}>
-              <RefreshCw aria-hidden="true" size={17} />
-              上传另一个文件
-            </SecondaryButton>
+            {!sender.busy && (
+              <SecondaryButton onClick={reset}>
+                <RefreshCw aria-hidden="true" size={17} />
+                发送另一个文件
+              </SecondaryButton>
+            )}
           </div>
           {copyStatus && <p className="text-sm font-bold text-[#365a88]" role="status">{copyStatus}</p>}
         </div>
       )}
 
       <div className="flex flex-wrap gap-3">
-        {!sender.pickupCode && !sender.canRetryPickup && (
-          <PrimaryButton onClick={() => void sender.upload()} disabled={!sender.file || sender.busy}>
-            <UploadCloud aria-hidden="true" size={17} />
-            {sender.busy ? "处理中..." : "开始上传"}
-          </PrimaryButton>
-        )}
-        {sender.canRetryPickup && (
-          <PrimaryButton onClick={() => void sender.retryPickup()} disabled={sender.busy}>
-            <RefreshCw aria-hidden="true" size={17} />
-            重试生成取件码
+        {!sender.pickupCode && (
+          <PrimaryButton onClick={() => void sender.start()} disabled={!sender.file || sender.busy}>
+            <FileCheck2 aria-hidden="true" size={17} />
+            {sender.busy ? "正在准备..." : "生成取件码"}
           </PrimaryButton>
         )}
         {sender.busy && (
@@ -275,7 +308,7 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
     <Panel className="grid gap-5 p-5 sm:p-7" testId="download-panel">
       <div>
         <h2 className="text-2xl font-black text-[#061b3a]">下载文件</h2>
-        <p className="mt-1 text-sm text-[#526c92]">输入发送方提供的 8 位取件码，确认文件后保存。</p>
+        <p className="mt-1 text-sm text-[#526c92]">输入 8 位取件码，一次完成连接、测速、接收和完整性校验。</p>
       </div>
 
       <label className="grid gap-2">
@@ -300,19 +333,19 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
               <FileCheck2 aria-hidden="true" size={23} />
             </span>
             <div className="min-w-0">
-              <strong className="block truncate text-lg text-[#061b3a]" title={receiver.descriptor.file.name}>{receiver.descriptor.file.name}</strong>
-              <span className="mt-1 block text-sm text-[#526c92]">{formatBytes(receiver.descriptor.file.size)}</span>
+              <strong className="block truncate text-lg text-[#061b3a]" title={receiver.descriptor.name}>{receiver.descriptor.name}</strong>
+              <span className="mt-1 block text-sm text-[#526c92]">{formatBytes(receiver.descriptor.size)}</span>
             </div>
           </div>
           <div className="inline-flex w-fit items-center gap-2 rounded-full bg-[#e8f8ef] px-3 py-1.5 text-xs font-extrabold text-[#23734c]">
             <ShieldCheck aria-hidden="true" size={15} />
-            {receiver.descriptor.file.sha256 ? "下载后校验 SHA-256" : "旧协议：仅校验文件大小"}
+            {receiver.descriptor.sha256 ? "完成前校验 SHA-256" : "旧协议：仅校验文件大小"}
           </div>
         </div>
       )}
 
-      {receiver.phase === "downloading" && (
-        <ProgressCard label={`已下载 ${formatBytes(receiver.downloadedBytes)}`} progress={receiver.progress} testId="download-progress" />
+      {receiver.phase === "receiving" && (
+        <ProgressCard label={`已接收 ${formatBytes(receiver.downloadedBytes)}`} progress={receiver.progress} testId="download-progress" />
       )}
 
       {receiver.phase === "complete" && (
@@ -321,21 +354,19 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
           <div>
             <strong className="text-[#073b25]">文件已安全保存</strong>
             <p className="mt-1 text-sm text-[#47725c]">保存位置：{receiver.savedTo || "浏览器下载"}</p>
+            {receiver.winner && <p className="mt-1 text-xs font-bold text-[#47725c]">最快线路：{receiver.winner.toUpperCase()}</p>}
           </div>
         </div>
       )}
 
       <div className="flex flex-wrap gap-3">
-        {!receiver.descriptor && (
-          <PrimaryButton onClick={() => void receiver.resolve()} disabled={receiver.code.length !== 8 || receiver.busy}>
-            <FileCheck2 aria-hidden="true" size={17} />
-            {receiver.phase === "resolving" ? "读取中..." : "读取取件码"}
-          </PrimaryButton>
-        )}
-        {receiver.descriptor && receiver.phase !== "complete" && (
-          <PrimaryButton onClick={() => void receiver.download()} disabled={receiver.busy}>
+        {receiver.phase !== "complete" && (
+          <PrimaryButton
+            onClick={() => void receiver.receive()}
+            disabled={receiver.code.length !== 8 || receiver.busy || receiver.metadataPending || !receiver.readyToReceive}
+          >
             <Download aria-hidden="true" size={17} />
-            {receiver.phase === "downloading" ? "下载中..." : "保存文件"}
+            {receiver.busy ? "接收中..." : receiver.metadataPending ? "正在读取..." : "开始接收"}
           </PrimaryButton>
         )}
         {receiver.busy && (
@@ -344,7 +375,7 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
             取消
           </SecondaryButton>
         )}
-        {(receiver.descriptor || receiver.phase === "complete") && !receiver.busy && (
+        {(receiver.descriptor || receiver.phase === "complete" || receiver.phase === "error") && !receiver.busy && (
           <SecondaryButton onClick={receiver.reset}>
             <RefreshCw aria-hidden="true" size={17} />
             输入其他取件码

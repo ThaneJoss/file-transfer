@@ -28,14 +28,16 @@ describe("API client", () => {
     window.removeEventListener(API_UNAUTHORIZED_EVENT, listener);
   });
 
-  it("emits a usage changed event for metered API calls", async () => {
+  it("does not infer byte usage from credential or SFU control-plane calls", async () => {
     const listener = vi.fn();
     window.addEventListener(API_USAGE_CHANGED_EVENT, listener);
     server.use(
       http.post("https://api.file.thanejoss.com/v1/r2/credentials", () => HttpResponse.json({ objectKey: "test" })),
+      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/new", () => HttpResponse.json({ sessionId: "test" })),
     );
     await apiJson("/v1/r2/credentials", "POST", { ttlSeconds: 3600 });
-    expect(listener).toHaveBeenCalledOnce();
+    await apiJson("/v1/sfu/sessions/new", "POST", {});
+    expect(listener).not.toHaveBeenCalled();
     window.removeEventListener(API_USAGE_CHANGED_EVENT, listener);
   });
 });

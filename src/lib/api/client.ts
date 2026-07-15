@@ -71,7 +71,6 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       throw new ApiError(value.error, response.status, body);
     }
   }
-  if (/^\/v1\/(turn\/credentials|r2\/credentials|sfu\/)/.test(path)) notifyApiUsageChanged();
   return body as T;
 }
 

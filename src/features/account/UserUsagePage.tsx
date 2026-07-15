@@ -5,17 +5,17 @@ import { Panel } from "../../component/Panel";
 import { PrimaryButton, SecondaryButton, StatusMessage, TextInput } from "../../component/TransferControls";
 import { authClient } from "../../lib/auth/client";
 import { useAuth } from "../../lib/auth/AuthProvider";
-import type { UsagePeriod, UsageService } from "../../lib/auth/AuthProvider";
+import type { UsagePeriod } from "../../lib/auth/AuthProvider";
 import type { UsageUnit } from "../../lib/auth/AuthProvider";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 
 const serviceRows: Array<{
-  service: UsageService;
+  id: "files" | "durable";
   label: string;
   description: string;
 }> = [
-  { service: "r2", label: "文件流量", description: "文件上传与下载流量" },
-  { service: "durable", label: "取件码请求", description: "生成和读取取件码的次数" },
+  { id: "files", label: "文件流量", description: "所有传输线路校验成功的文件流量" },
+  { id: "durable", label: "取件码请求", description: "生成、读取和协调取件码的次数" },
 ];
 
 export function UserUsagePage() {
@@ -132,10 +132,12 @@ export function UserUsagePage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {serviceRows.map((row) => {
-          const summary = usage.services[row.service];
+          const summary = row.id === "files"
+            ? { usage: usage.totalBytes, quota: usage.totalQuotaBytes, unit: "bytes" as const }
+            : usage.services.durable;
           const quotaPercent = percentOfQuota(summary.usage, summary.quota);
           return (
-            <Panel className="p-5" key={row.service} testId={`usage-card-${row.service}`}>
+            <Panel className="p-5" key={row.id} testId={`usage-card-${row.id}`}>
               <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-xl font-extrabold text-[#061b3a]">{row.label}</h2>
