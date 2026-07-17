@@ -1,6 +1,7 @@
 import { requestR2Credentials } from "../../r2/services/r2Credentials";
 import type { R2TemporaryCredentials } from "../../r2/services/r2Credentials";
-import { presignedR2Url, signedR2Request } from "../../r2/services/r2Signing";
+import { encryptedTransferSize } from "../crypto/fileEncryption";
+import type { TransferEncryptionContext } from "../crypto/fileEncryption";
 import { createR2TransferDescriptor, encodeTransferDescriptor } from "../protocol/fileProtocol";
 import type { R2RouteOffer } from "../protocol/fileProtocol";
 import { createSha256Hasher, receiveVerifiedResponse, sha256Blob } from "../protocol/fileStream";
@@ -8,6 +9,8 @@ import type { ReceiveTarget } from "../protocol/fileStream";
 import { createPickup } from "./pickupApi";
 import { reportVerifiedTransferUsage } from "./transferUsage";
 import { throwIfAborted } from "../hooks/useTransferLifecycle";
+import { loadMultipartResume, uploadMultipartR2 } from "./r2Multipart";
+import type { MultipartResumeState } from "./r2Multipart";
 
 export type UploadPhase = "hashing" | "authorizing" | "uploading" | "publishing";
 
@@ -15,6 +18,8 @@ export type R2SenderSession = {
   route: R2RouteOffer;
   credentials: R2TemporaryCredentials;
   probeUploadElapsedMs: number;
+  encryption?: TransferEncryptionContext | null;
+  multipartResume: { fingerprint: string; state: MultipartResumeState | null };
 };
 
 const r2ProbeBytes = 64 * 1024;
@@ -22,21 +27,28 @@ const r2ProbeBytes = 64 * 1024;
 export async function prepareR2Route({
   file,
   signal,
+  encryption,
   onProgress,
 }: {
   file: File;
   signal: AbortSignal;
+  encryption?: TransferEncryptionContext | null;
   onProgress?: (message: string) => void;
 }): Promise<R2SenderSession> {
   onProgress?.("正在准备 R2 线路...");
-  const credentials = await requestR2Credentials(file.name, signal);
+  const multipartResume = await loadMultipartResume(file, encryption?.metadata.keyId);
+  const credentials = await requestR2Credentials(file.name, signal, {
+    fileSizeBytes: file.size,
+    ...(multipartResume.state ? { objectKey: multipartResume.state.objectKey } : {}),
+  });
   const expiresAt = Date.parse(credentials.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("R2 临时授权已过期，请重试。");
 
   const probe = new Uint8Array(Math.min(r2ProbeBytes, Math.max(1, file.size || 1)));
   crypto.getRandomValues(probe);
   const probeSha256 = await hashBytes(probe);
-  const signedProbe = await signedR2Request({
+  const signing = await import("../../r2/services/r2Signing");
+  const signedProbe = await signing.signedR2Request({
     credentials,
     method: "PUT",
     objectKey: credentials.objectKey,
@@ -50,10 +62,12 @@ export async function prepareR2Route({
 
   const expiresIn = Math.min(3600, Math.floor((expiresAt - Date.now()) / 1000));
   if (expiresIn < 30) throw new Error("R2 临时授权有效期不足，请重试。");
-  const downloadUrl = await presignedR2Url({ credentials, method: "GET", objectKey: credentials.objectKey, expiresIn });
+  const downloadUrl = await signing.presignedR2Url({ credentials, method: "GET", objectKey: credentials.objectKey, expiresIn });
   return {
     credentials,
     probeUploadElapsedMs,
+    encryption,
+    multipartResume,
     route: {
       kind: "r2",
       objectKey: credentials.objectKey,
@@ -61,6 +75,7 @@ export async function prepareR2Route({
       expiresAt,
       probeSize: probe.byteLength,
       probeSha256,
+      ...(encryption ? { contentSize: encryptedTransferSize(file.size, 48 * 1024, encryption.metadata.tagBytes) } : {}),
     },
   };
 }
@@ -90,7 +105,20 @@ export async function uploadR2File({
   signal: AbortSignal;
   onProgress?: (bytes: number, total: number) => void;
 }) {
-  const signed = await signedR2Request({
+  if (file.size > 0 && (session.encryption || file.size >= 8 * 1024 * 1024)) {
+    await uploadMultipartR2({
+      credentials: session.credentials,
+      file,
+      chunkSize: 48 * 1024,
+      encryption: session.encryption,
+      resume: session.multipartResume,
+      signal,
+      onProgress,
+    });
+    return;
+  }
+  const signing = await import("../../r2/services/r2Signing");
+  const signed = await signing.signedR2Request({
     credentials: session.credentials,
     method: "PUT",
     objectKey: session.route.objectKey,
@@ -132,7 +160,7 @@ export async function streamR2FileWhenReady({
 }: {
   route: R2RouteOffer;
   expectedSize: number;
-  expectedSha256: string;
+  expectedSha256: string | null;
   chunkSize: number;
   signal: AbortSignal;
   onChunk: (sequence: number, chunk: Uint8Array) => Promise<void>;
@@ -182,7 +210,7 @@ export async function streamR2FileWhenReady({
 async function waitForR2Response(
   route: R2RouteOffer,
   expectedSize: number,
-  expectedSha256: string,
+  expectedSha256: string | null,
   signal: AbortSignal,
 ) {
   while (true) {
@@ -215,7 +243,12 @@ async function waitForR2Response(
     }
     if (expectedSize <= r2ProbeBytes) {
       const bytes = await readSmallResponse(response, r2ProbeBytes + 1);
-      if (bytes.byteLength !== expectedSize || await hashBytes(bytes) !== expectedSha256) {
+      const digest = await hashBytes(bytes);
+      if (
+        bytes.byteLength !== expectedSize ||
+        digest === route.probeSha256 ||
+        (expectedSha256 !== null && digest !== expectedSha256)
+      ) {
         await delay(650, signal);
         continue;
       }
@@ -356,7 +389,8 @@ export async function uploadFile({
     throw new Error("临时上传授权已过期，请重试。");
   }
 
-  const signed = await signedR2Request({
+  const signing = await import("../../r2/services/r2Signing");
+  const signed = await signing.signedR2Request({
     credentials,
     method: "PUT",
     objectKey: credentials.objectKey,
@@ -374,7 +408,7 @@ export async function uploadFile({
   if (expiresIn < 30) {
     throw new Error("上传完成时临时授权即将过期，请重新上传以生成可用取件码。");
   }
-  const downloadUrl = await presignedR2Url({
+  const downloadUrl = await signing.presignedR2Url({
     credentials,
     method: "GET",
     objectKey: credentials.objectKey,

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && pnpm check:bundle",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc -b && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm test:unit",
@@ -15,6 +15,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
     "check": "pnpm typecheck && pnpm test:unit && pnpm test:e2e && pnpm build"
   },
   "dependencies": {

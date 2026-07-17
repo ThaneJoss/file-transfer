@@ -2,6 +2,10 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "https://api.f
 
 export const API_UNAUTHORIZED_EVENT = "file-transfer:api-unauthorized";
 export const API_USAGE_CHANGED_EVENT = "file-transfer:api-usage-changed";
+const guestStorageKey = "file-transfer:pickup-guest";
+
+type PickupGuestAuth = { code: string; token: string; expiresAt: number };
+let pickupGuestAuth: PickupGuestAuth | null = readPickupGuestAuth();
 
 type ApiErrorBody = {
   error?: unknown;
@@ -42,6 +46,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (init.body !== undefined && method !== "GET" && method !== "HEAD" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  const guest = currentPickupGuestAuth();
+  if (guest && !headers.has("X-Pickup-Guest-Token")) headers.set("X-Pickup-Guest-Token", guest.token);
 
   const response = await fetch(apiUrl(path), {
     ...init,
@@ -86,4 +92,48 @@ export function apiJson<T>(
 export function notifyApiUsageChanged() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(API_USAGE_CHANGED_EVENT));
+}
+
+export function setPickupGuestAuth(value: PickupGuestAuth) {
+  pickupGuestAuth = value;
+  guestStorage()?.setItem(guestStorageKey, JSON.stringify(value));
+}
+
+export function clearPickupGuestAuth(code?: string) {
+  if (code && pickupGuestAuth?.code !== code) return;
+  pickupGuestAuth = null;
+  guestStorage()?.removeItem(guestStorageKey);
+}
+
+export function hasPickupGuestAuth(code: string) {
+  return currentPickupGuestAuth()?.code === code;
+}
+
+function currentPickupGuestAuth() {
+  if (pickupGuestAuth && pickupGuestAuth.expiresAt > Date.now()) return pickupGuestAuth;
+  clearPickupGuestAuth();
+  return null;
+}
+
+function readPickupGuestAuth(): PickupGuestAuth | null {
+  const storage = guestStorage();
+  if (!storage) return null;
+  try {
+    const value = JSON.parse(storage.getItem(guestStorageKey) ?? "null") as Partial<PickupGuestAuth> | null;
+    if (
+      value && /^\d{8}$/.test(value.code ?? "") && typeof value.token === "string" && value.token &&
+      typeof value.expiresAt === "number" && value.expiresAt > Date.now()
+    ) return value as PickupGuestAuth;
+  } catch {
+    // Ignore stale or malformed session data.
+  }
+  return null;
+}
+
+function guestStorage() {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
 }

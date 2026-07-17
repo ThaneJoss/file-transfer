@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { Panel } from "../../component/Panel";
 import { PrimaryButton, SecondaryButton } from "../../component/TransferControls";
@@ -22,55 +22,28 @@ import { copyText } from "../../lib/browser/clipboard";
 import { formatBytes, formatPercent } from "../../lib/files/format";
 import { useFileReceiver } from "./hooks/useFileReceiver";
 import { useFileSender } from "./hooks/useFileSender";
+import type { RouteStates } from "./services/multipathTransfer";
 
 type Mode = "upload" | "download";
 
 export function FileTransferPage() {
   const { session, isPending, sessionError } = useAuth();
-  const [mode, setMode] = useState<Mode>("upload");
+  const [searchParams] = useSearchParams();
+  const initialCode = searchParams.get("code") ?? "";
+  const [mode, setMode] = useState<Mode>(() => /^\d{8}$/.test(initialCode) ? "download" : "upload");
   const sender = useFileSender();
-  const receiver = useFileReceiver();
+  const receiver = useFileReceiver({ allowGuest: !isPending && !session?.user, initialCode });
 
   useEffect(() => {
     if (isPending || session?.user) return;
     if (sender.busy) sender.cancel();
-    if (receiver.busy) receiver.cancel();
-  }, [isPending, receiver.busy, receiver.cancel, sender.busy, sender.cancel, session?.user]);
+  }, [isPending, sender.busy, sender.cancel, session?.user]);
 
   if (isPending) {
     return (
       <Panel className="mx-auto grid min-h-[260px] w-full max-w-3xl place-items-center p-8" testId="transfer-loading">
         <p className="text-sm font-bold text-[#526c92]" role="status">正在确认登录状态...</p>
       </Panel>
-    );
-  }
-
-  if (!session?.user) {
-    return (
-      <div className="mx-auto grid w-full max-w-3xl gap-5 py-4" data-testid="transfer-login-required">
-        <Panel className="p-7 sm:p-9">
-          <div className="grid justify-items-center gap-5 text-center">
-            <span className="grid size-16 place-items-center rounded-2xl bg-[#eaf2ff] text-[#1677ff]">
-              <ShieldCheck aria-hidden="true" size={32} />
-            </span>
-            <div>
-              <h1 className="text-2xl font-black text-[#061b3a]">登录后上传或下载文件</h1>
-              <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#526c92]">
-                生成取件码后，系统会在 Direct、STUN、TURN、SFU 和 R2 中自动选择最快线路。
-              </p>
-              {sessionError && <p className="mt-3 text-sm font-bold text-[#b4232b]" role="alert">{sessionError}</p>}
-            </div>
-            <Link
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#1677ff] px-6 text-sm font-extrabold text-white hover:bg-[#0d63da]"
-              to="/login"
-              state={{ from: "/" }}
-            >
-              <LogIn aria-hidden="true" size={18} />
-              使用 Passkey 登录
-            </Link>
-          </div>
-        </Panel>
-      </div>
     );
   }
 
@@ -100,8 +73,39 @@ export function FileTransferPage() {
         <ModeButton active={mode === "download"} icon={Download} label="下载文件" onClick={() => switchMode("download")} testId="transfer-mode-download" />
       </div>
 
-      {mode === "upload" ? <UploadView sender={sender} /> : <DownloadView receiver={receiver} />}
+      {mode === "upload"
+        ? session?.user
+          ? <UploadView sender={sender} />
+          : <UploadLoginRequired sessionError={sessionError} />
+        : <DownloadView receiver={receiver} guest={!session?.user} />}
     </div>
+  );
+}
+
+function UploadLoginRequired({ sessionError }: { sessionError: string }) {
+  return (
+    <Panel className="p-7 sm:p-9" testId="transfer-login-required">
+      <div className="grid justify-items-center gap-5 text-center">
+        <span className="grid size-16 place-items-center rounded-2xl bg-[#eaf2ff] text-[#1677ff]">
+          <ShieldCheck aria-hidden="true" size={32} />
+        </span>
+        <div>
+          <h2 className="text-2xl font-black text-[#061b3a]">上传文件需要登录</h2>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#526c92]">
+            Passkey 用于保护上传额度；接收方无需注册，打开分享链接即可下载。
+          </p>
+          {sessionError && <p className="mt-3 text-sm font-bold text-[#b4232b]" role="alert">{sessionError}</p>}
+        </div>
+        <Link
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#1677ff] px-6 text-sm font-extrabold text-white hover:bg-[#0d63da]"
+          to="/login"
+          state={{ from: "/" }}
+        >
+          <LogIn aria-hidden="true" size={18} />
+          使用 Passkey 登录
+        </Link>
+      </div>
+    </Panel>
   );
 }
 
@@ -159,6 +163,14 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
       setCopyStatus(error instanceof Error ? error.message : "复制失败。");
     }
   };
+  const copyShareLink = async () => {
+    try {
+      await copyText(sender.shareUrl);
+      setCopyStatus("分享链接已复制。接收方无需登录。");
+    } catch (error) {
+      setCopyStatus(error instanceof Error ? error.message : "复制失败。");
+    }
+  };
 
   return (
     <Panel className="grid gap-5 p-5 sm:p-7" testId="upload-panel">
@@ -192,6 +204,25 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
             <span className="mt-0.5 block text-xs font-medium">五条线路同时传输</span>
           </button>
         </div>
+      )}
+
+      {!sender.pickupCode && (
+        <label className="flex items-start gap-3 rounded-xl border border-[#b9d7ff] bg-[#f7fbff] p-4">
+          <input
+            className="mt-1 size-4 accent-[#1677ff]"
+            type="checkbox"
+            checked={sender.encryptionEnabled}
+            disabled={sender.busy}
+            onChange={(event) => sender.setEncryptionEnabled(event.target.checked)}
+            data-testid="transfer-encryption"
+          />
+          <span>
+            <strong className="block text-sm text-[#061b3a]">端到端加密（推荐）</strong>
+            <span className="mt-1 block text-xs leading-5 text-[#526c92]">
+              密钥只包含在分享链接的 # 片段中，不会发送给取件码服务；关闭后可仅凭 8 位取件码接收。
+            </span>
+          </span>
+        </label>
       )}
 
       {sender.mode === "turbo" && !sender.pickupCode && (
@@ -267,10 +298,14 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-3">
-            <PrimaryButton onClick={() => void copyPickupCode()}>
+            <PrimaryButton onClick={() => void copyShareLink()}>
               <Copy aria-hidden="true" size={17} />
-              复制取件码
+              复制分享链接
             </PrimaryButton>
+            <SecondaryButton onClick={() => void copyPickupCode()}>
+              <Copy aria-hidden="true" size={17} />
+              仅复制取件码
+            </SecondaryButton>
             {!sender.busy && (
               <SecondaryButton onClick={reset}>
                 <RefreshCw aria-hidden="true" size={17} />
@@ -302,17 +337,19 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
           </SecondaryButton>
         )}
       </div>
+      <RouteStatus routes={sender.routes} supportId={sender.supportId} />
       <InlineStatus status={sender.status} error={sender.error} />
     </Panel>
   );
 }
 
-function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceiver> }) {
+function DownloadView({ receiver, guest }: { receiver: ReturnType<typeof useFileReceiver>; guest: boolean }) {
   return (
     <Panel className="grid gap-5 p-5 sm:p-7" testId="download-panel">
       <div>
         <h2 className="text-2xl font-black text-[#061b3a]">下载文件</h2>
         <p className="mt-1 text-sm text-[#526c92]">输入 8 位取件码，一次完成连接、测速、接收和完整性校验。</p>
+        {guest && <p className="mt-2 text-xs font-bold text-[#23734c]">访客接收已启用，无需注册账号。</p>}
       </div>
 
       <label className="grid gap-2">
@@ -343,7 +380,9 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
           </div>
           <div className="inline-flex w-fit items-center gap-2 rounded-full bg-[#e8f8ef] px-3 py-1.5 text-xs font-extrabold text-[#23734c]">
             <ShieldCheck aria-hidden="true" size={15} />
-            {receiver.descriptor.sha256 ? "完成前校验 SHA-256" : "旧协议：仅校验文件大小"}
+            {receiver.encrypted
+              ? "端到端加密 · 完成前校验 SHA-256"
+              : receiver.descriptor.sha256 ? "完成前校验 SHA-256" : "旧协议：仅校验文件大小"}
           </div>
         </div>
       )}
@@ -386,8 +425,31 @@ function DownloadView({ receiver }: { receiver: ReturnType<typeof useFileReceive
           </SecondaryButton>
         )}
       </div>
+      <RouteStatus routes={receiver.routes} supportId={receiver.supportId} />
       <InlineStatus status={receiver.status} error={receiver.error} />
     </Panel>
+  );
+}
+
+function RouteStatus({ routes, supportId }: { routes: RouteStates; supportId: string }) {
+  const entries = Object.entries(routes);
+  if (!entries.length && !supportId) return null;
+  const stateLabels: Record<string, string> = {
+    preparing: "准备中", ready: "已就绪", probing: "测速中", selected: "已选择",
+    transferring: "传输中", complete: "已完成", failed: "不可用",
+  };
+  return (
+    <details className="rounded-xl border border-[#d7e5f6] bg-white px-4 py-3 text-sm" data-testid="route-diagnostics">
+      <summary className="cursor-pointer font-extrabold text-[#365a88]">连接详情与故障编号</summary>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {entries.map(([route, state]) => (
+          <span className="rounded-full bg-[#edf6ff] px-3 py-1 text-xs font-bold text-[#365a88]" key={route}>
+            {route.toUpperCase()} · {stateLabels[state] ?? state}
+          </span>
+        ))}
+      </div>
+      {supportId && <p className="mt-3 break-all font-mono text-xs text-[#6b7f9f]">故障编号：{supportId}</p>}
+    </details>
   );
 }
 

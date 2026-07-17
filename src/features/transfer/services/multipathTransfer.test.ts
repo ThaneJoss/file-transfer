@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fileTransferAnswerKind } from "../protocol/fileProtocol";
-import type { MultipathTransferAnswer } from "../protocol/fileProtocol";
-import { rankTransferRoutes, withRouteDeadline } from "./multipathTransfer";
+import { fileTransferAnswerKind, fileTransferProtocolKind } from "../protocol/fileProtocol";
+import type { MultipathTransferAnswer, MultipathTransferOffer } from "../protocol/fileProtocol";
+import {
+  assertWinnerMatches,
+  linkedAbortController,
+  rankTransferRoutes,
+  settle,
+  withRouteDeadline,
+  withTimeout,
+} from "./multipathCoordinator";
 import type { ProbeResult } from "./channelTransfer";
 import type { R2SenderSession } from "./r2Transfer";
 
@@ -20,6 +27,7 @@ function answer(r2?: { bytes: number; elapsedMs: number }): MultipathTransferAns
 function r2Session(probeUploadElapsedMs: number): R2SenderSession {
   return {
     probeUploadElapsedMs,
+    multipartResume: { fingerprint: "test", state: null },
     route: {
       kind: "r2",
       objectKey: "users/test/file.bin",
@@ -73,5 +81,53 @@ describe("multipath route ranking", () => {
     await vi.advanceTimersByTimeAsync(100);
     await assertion;
     expect(parent.signal.aborted).toBe(false);
+  });
+
+  it("propagates parent cancellation to every child coordinator", () => {
+    const parent = new AbortController();
+    const child = linkedAbortController(parent.signal);
+    parent.abort(new DOMException("cancelled", "AbortError"));
+    expect(child.signal).toMatchObject({ aborted: true, reason: parent.signal.reason });
+  });
+
+  it("disposes a route when its connection deadline expires", async () => {
+    vi.useFakeTimers();
+    const dispose = vi.fn();
+    const operation = withTimeout(new Promise<never>(() => undefined), 100, dispose);
+    const assertion = expect(operation).rejects.toThrow("线路连接超时");
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a winner that was not started or does not match the manifest", () => {
+    const offer: MultipathTransferOffer = {
+      kind: fileTransferProtocolKind,
+      transferId: "123e4567-e89b-42d3-a456-426614174099",
+      mode: "auto",
+      createdAt: 1,
+      file: {
+        id: "123e4567-e89b-42d3-a456-426614174098",
+        name: "demo.bin",
+        size: 5,
+        type: "application/octet-stream",
+        lastModified: 1,
+        sha256: "ab".repeat(32),
+        chunkSize: 48 * 1024,
+        totalChunks: 1,
+      },
+      routes: [],
+    };
+    const valid = { route: "direct" as const, bytes: 5, sha256: "ab".repeat(32) };
+    expect(assertWinnerMatches(valid, offer, new Set(["direct"]))).toBe(valid);
+    expect(() => assertWinnerMatches({ ...valid, route: "r2" }, offer, new Set(["direct"]))).toThrow("胜者完整性");
+    expect(() => assertWinnerMatches({ ...valid, bytes: 4 }, offer, new Set(["direct"]))).toThrow("胜者完整性");
+  });
+
+  it("normalizes optional route failures without rejecting the whole preparation", async () => {
+    await expect(settle(Promise.reject("route failed"))).resolves.toMatchObject({
+      ok: false,
+      error: { message: "route failed" },
+    });
   });
 });

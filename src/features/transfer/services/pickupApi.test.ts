@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 
-import { API_USAGE_CHANGED_EVENT } from "../../../lib/api/client";
+import { API_USAGE_CHANGED_EVENT, clearPickupGuestAuth } from "../../../lib/api/client";
 import { server } from "../../../test/mocks/server";
 import {
   cancelPickup,
@@ -128,5 +128,40 @@ describe("pickup API service", () => {
     await expect(
       monitorPickupCancellation("12345678", new AbortController().signal, Date.now() + 60_000),
     ).rejects.toThrow("另一端已取消传输");
+  });
+
+  it("claims one pickup for a guest and scopes subsequent coordination with its token", async () => {
+    const expiresAt = Date.now() + 60_000;
+    server.use(
+      http.post("https://api.file.thanejoss.com/v1/pickups/12345678/guest", async ({ request }) => {
+        expect(await request.json()).toEqual({});
+        expect(request.headers.get("x-pickup-guest-token")).toBeNull();
+        return HttpResponse.json({
+          token: "guest-token",
+          expiresAt,
+          pickup: {
+            status: "found",
+            variant: "multipath",
+            offer: "guest-offer",
+            expiresAt,
+            answered: false,
+          },
+        }, { status: 201 });
+      }),
+      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/status", ({ request }) => {
+        expect(request.headers.get("x-pickup-guest-token")).toBe("guest-token");
+        expect(new URL(request.url).searchParams.get("wait")).toBe("20000");
+        return HttpResponse.json({ cancelled: false, expiresAt });
+      }),
+    );
+
+    try {
+      await expect(waitForPickupOffer("12345678", undefined, { allowGuest: true })).resolves.toMatchObject({
+        offer: "guest-offer",
+      });
+      await expect(getPickupStatus("12345678", undefined, 20_000)).resolves.toEqual({ cancelled: false, expiresAt });
+    } finally {
+      clearPickupGuestAuth();
+    }
   });
 });

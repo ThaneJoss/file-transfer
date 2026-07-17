@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { receiveVerifiedResponse, sha256Blob } from "./fileStream";
 
 const helloSha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
 
 describe("streaming file integrity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("hashes a Blob incrementally", async () => {
     const progress: number[] = [];
     const digest = await sha256Blob(new Blob(["hello"]), {
@@ -62,5 +64,30 @@ describe("streaming file integrity", () => {
     await expect(sha256Blob(new Blob(["hello"]), { signal: controller.signal })).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+
+  it("moves large-file hashing into a worker and forwards progress", async () => {
+    const terminate = vi.fn();
+    const worker = {
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onerror: null as ((event: ErrorEvent) => void) | null,
+      terminate,
+      postMessage: vi.fn(() => queueMicrotask(() => {
+        worker.onmessage?.(new MessageEvent("message", { data: { kind: "progress", bytes: 8 * 1024 * 1024 } }));
+        worker.onmessage?.(new MessageEvent("message", { data: { kind: "complete", digest: "ab".repeat(32) } }));
+      })),
+    };
+    const WorkerMock = vi.fn(function WorkerMock() { return worker; });
+    vi.stubGlobal("Worker", WorkerMock);
+    const progress: number[] = [];
+
+    await expect(sha256Blob(new Blob([new Uint8Array(8 * 1024 * 1024)]), {
+      onProgress: (bytes) => progress.push(bytes),
+    })).resolves.toBe("ab".repeat(32));
+
+    expect(WorkerMock).toHaveBeenCalledOnce();
+    expect(worker.postMessage).toHaveBeenCalledOnce();
+    expect(progress).toEqual([0, 8 * 1024 * 1024]);
+    expect(terminate).toHaveBeenCalledOnce();
   });
 });
