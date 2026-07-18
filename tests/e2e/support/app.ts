@@ -343,6 +343,9 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
   let winner: { route: "direct" | "stun"; bytes: number; sha256: string } | null = null;
   let cancelled = false;
   const expiresAt = Date.now() + 3_600_000;
+  const answerReady = deferredSignal();
+  const selectionReady = deferredSignal();
+  const winnerReady = deferredSignal();
 
   await context.addInitScript(() => {
     window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 }, clipboardText: "" };
@@ -399,23 +402,29 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
     if (path === "/v1/pickups/12345678/answer") {
       if (method === "PUT") {
         answer = (await request.postDataJSON() as { answer: string }).answer;
+        answerReady.resolve();
         return json({ accepted: true });
       }
-      return json({ answer: answer || null });
+      if (!answer) await answerReady.promise;
+      return json({ answer });
     }
     if (path === "/v1/pickups/12345678/selection") {
       if (method === "PUT") {
         selection = (await request.postDataJSON() as { route: "direct" | "stun" }).route;
+        selectionReady.resolve();
         return json({ accepted: true });
       }
-      return selection ? json({ route: selection }) : json({ error: "selection pending" }, 404);
+      if (!selection) await selectionReady.promise;
+      return json({ route: selection });
     }
     if (path === "/v1/pickups/12345678/winner") {
       if (method === "PUT") {
         winner = await request.postDataJSON() as typeof winner;
+        winnerReady.resolve();
         return json({ accepted: true });
       }
-      return winner ? json(winner) : json({ error: "winner pending" }, 404);
+      if (!winner) await winnerReady.promise;
+      return json(winner);
     }
     if (path === "/v1/pickups/12345678/status") return json({ cancelled, expiresAt });
     if (path === "/v1/pickups/12345678/cancel" && method === "PUT") {
@@ -435,6 +444,12 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
     getSelection: () => selection,
     getWinner: () => winner,
   };
+}
+
+function deferredSignal() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 export function collectConsoleErrors(page: Page) {
