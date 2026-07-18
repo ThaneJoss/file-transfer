@@ -9,6 +9,7 @@ import {
 } from "./support/app";
 
 const helloSha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+const probeSha256 = "ba9c736f19e7f60b7f6764adb0b7908c0a2b394e09b6c09863528c7f2bc86095";
 
 function transferDescriptor(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -54,7 +55,7 @@ function multipathDescriptor(mode: "auto" | "turbo") {
       downloadUrl: "https://example-account.r2.cloudflarestorage.com/demo-bucket/users/server/hello.txt?X-Amz-Signature=fake",
       expiresAt: Date.now() + 3_600_000,
       probeSize: 5,
-      probeSha256: helloSha256,
+      probeSha256,
     }],
   });
 }
@@ -122,7 +123,12 @@ test.describe("unified file transfer", () => {
   });
 
   test("opens a share link and receives as a guest without a login", async ({ page }) => {
-    await installAppMocks(page, { signedIn: false, pickupOffer: transferDescriptor(), downloadBody: "hello" });
+    await installAppMocks(page, {
+      signedIn: false,
+      pickupVariant: "r2",
+      pickupOffer: transferDescriptor(),
+      downloadBody: "hello",
+    });
     await page.goto("/?code=12345678");
 
     await expect(page.getByText("访客接收已启用，无需注册账号。")).toBeVisible();

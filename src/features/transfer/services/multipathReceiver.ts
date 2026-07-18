@@ -357,4 +357,3 @@ export async function chooseInitialReceiveTarget(file?: Pick<TransferFileManifes
   if (file && file.size > memoryReceiveLimitBytes) return chooseReceiveTargetForFile(file);
   return { kind: "memory" } as ReceiveTarget;
 }
-

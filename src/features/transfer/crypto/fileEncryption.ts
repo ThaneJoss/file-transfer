@@ -5,25 +5,52 @@ export type TransferEncryptionContext = {
   key: CryptoKey;
   secret: string;
   resumeId?: string;
+  fileSha256?: string;
 };
 
 const encryptionResumePrefix = "file-transfer:encryption:";
+const sha256Pattern = /^[0-9a-f]{64}$/;
+type EncryptionResumeRecord = {
+  secret?: string;
+  metadata?: TransferEncryptionMetadata;
+  fileSha256?: string;
+  updatedAt?: number;
+};
 
-export async function createTransferEncryption(file?: Pick<File, "name" | "size" | "lastModified">): Promise<TransferEncryptionContext> {
+export async function createTransferEncryption(
+  file?: Pick<File, "name" | "size" | "lastModified">,
+  options: { hashFile?: () => Promise<string> } = {},
+): Promise<TransferEncryptionContext> {
   const resumeId = file ? await sha256Hex(new TextEncoder().encode(`${file.name}\0${file.size}\0${file.lastModified}`)) : undefined;
   const storage = localEncryptionStorage();
   if (resumeId && storage) {
+    let saved: EncryptionResumeRecord | null = null;
     try {
-      const saved = JSON.parse(storage.getItem(encryptionResumePrefix + resumeId) ?? "null") as {
-        secret?: string;
-        metadata?: TransferEncryptionMetadata;
-        updatedAt?: number;
-      } | null;
-      if (saved?.secret && saved.metadata && Date.now() - (saved.updatedAt ?? 0) < 24 * 60 * 60 * 1000) {
-        const key = await importTransferEncryptionKey(saved.secret, saved.metadata);
-        return { key, secret: saved.secret, metadata: saved.metadata, resumeId };
-      }
+      saved = JSON.parse(storage.getItem(encryptionResumePrefix + resumeId) ?? "null") as EncryptionResumeRecord | null;
     } catch {
+      storage.removeItem(encryptionResumePrefix + resumeId);
+    }
+    if (
+      saved?.secret &&
+      saved.metadata &&
+      saved.fileSha256 &&
+      sha256Pattern.test(saved.fileSha256) &&
+      Date.now() - (saved.updatedAt ?? 0) < 24 * 60 * 60 * 1000 &&
+      options.hashFile
+    ) {
+      const fileSha256 = normalizeSha256(await options.hashFile());
+      if (!fileSha256) throw new Error("文件校验摘要无效。");
+      if (fileSha256 === saved.fileSha256) {
+        try {
+          const key = await importTransferEncryptionKey(saved.secret, saved.metadata);
+          return { key, secret: saved.secret, metadata: saved.metadata, resumeId, fileSha256 };
+        } catch {
+          storage.removeItem(encryptionResumePrefix + resumeId);
+        }
+      } else {
+        storage.removeItem(encryptionResumePrefix + resumeId);
+      }
+    } else if (saved) {
       storage.removeItem(encryptionResumePrefix + resumeId);
     }
   }
@@ -41,14 +68,24 @@ export async function createTransferEncryption(file?: Pick<File, "name" | "size"
     },
     ...(resumeId ? { resumeId } : {}),
   };
-  if (resumeId && storage) {
-    storage.setItem(encryptionResumePrefix + resumeId, JSON.stringify({
+  return context;
+}
+
+export function persistTransferEncryptionResume(context: TransferEncryptionContext, fileSha256: string) {
+  const normalizedSha256 = normalizeSha256(fileSha256);
+  if (!normalizedSha256) throw new Error("文件校验摘要无效。");
+  context.fileSha256 = normalizedSha256;
+  if (!context.resumeId) return;
+  try {
+    localEncryptionStorage()?.setItem(encryptionResumePrefix + context.resumeId, JSON.stringify({
       secret: context.secret,
       metadata: context.metadata,
+      fileSha256: normalizedSha256,
       updatedAt: Date.now(),
     }));
+  } catch {
+    // Resume storage is best effort; encryption can safely continue without it.
   }
-  return context;
 }
 
 export function clearTransferEncryptionResume(context: TransferEncryptionContext | null | undefined) {
@@ -143,6 +180,11 @@ async function sha256Hex(bytes: Uint8Array) {
 
 function arrayBuffer(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function normalizeSha256(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return sha256Pattern.test(normalized) ? normalized : null;
 }
 
 function localEncryptionStorage() {

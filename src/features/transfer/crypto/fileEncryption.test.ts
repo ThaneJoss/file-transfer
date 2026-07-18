@@ -7,6 +7,7 @@ import {
   encryptedTransferSize,
   encryptTransferChunk,
   importTransferEncryptionKey,
+  persistTransferEncryptionResume,
 } from "./fileEncryption";
 
 describe("file transfer encryption", () => {
@@ -47,12 +48,28 @@ describe("file transfer encryption", () => {
 
   it("reuses the same key for an interrupted file and clears it after success", async () => {
     const file = new File(["resume"], "resume.txt", { lastModified: 123 });
+    const fileSha256 = "a".repeat(64);
     const first = await createTransferEncryption(file);
-    const resumed = await createTransferEncryption(file);
+    persistTransferEncryptionResume(first, fileSha256);
+    const resumed = await createTransferEncryption(file, { hashFile: async () => fileSha256 });
     expect(resumed.secret).toBe(first.secret);
+    expect(resumed.fileSha256).toBe(fileSha256);
 
     clearTransferEncryptionResume(first);
-    const next = await createTransferEncryption(file);
+    const next = await createTransferEncryption(file, { hashFile: async () => fileSha256 });
     expect(next.secret).not.toBe(first.secret);
+  });
+
+  it("never reuses a key when file metadata matches but content does not", async () => {
+    const original = new File(["same"], "collision.txt", { lastModified: 456 });
+    const replacement = new File(["diff"], "collision.txt", { lastModified: 456 });
+    expect(replacement.size).toBe(original.size);
+
+    const first = await createTransferEncryption(original);
+    persistTransferEncryptionResume(first, "a".repeat(64));
+    const changed = await createTransferEncryption(replacement, { hashFile: async () => "b".repeat(64) });
+
+    expect(changed.secret).not.toBe(first.secret);
+    expect(changed.metadata.noncePrefix).not.toBe(first.metadata.noncePrefix);
   });
 });

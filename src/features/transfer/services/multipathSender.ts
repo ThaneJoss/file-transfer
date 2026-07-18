@@ -7,7 +7,10 @@ import {
   encodeTransferOffer,
   fileTransferProtocolKind,
 } from "../protocol/fileProtocol";
-import type { TransferEncryptionContext } from "../crypto/fileEncryption";
+import {
+  persistTransferEncryptionResume,
+  type TransferEncryptionContext,
+} from "../crypto/fileEncryption";
 import type {
   MultipathTransferOffer,
   TransferMethod,
@@ -96,7 +99,10 @@ export async function runMultipathSender({
     for (const route of ["direct", "stun", "turn", "sfu", "r2"] as const) setRoute(route, "preparing");
     callbacks.onStatus?.("正在并行校验文件并准备五条传输线路...");
 
-    const hashPromise = sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
+    const hashPromise = encryption?.fileSha256
+      ? Promise.resolve(encryption.fileSha256)
+      : sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
+    if (encryption?.fileSha256) callbacks.onHashProgress?.(file.size, file.size);
 
     const prepareWebRtc = (route: "direct" | "stun" | "turn") => withRouteDeadline(
       signal,
@@ -146,6 +152,7 @@ export async function runMultipathSender({
     ]);
     if (!hashResult.ok) throw hashResult.error;
     const sha256 = hashResult.value;
+    if (encryption) persistTransferEncryptionResume(encryption, sha256);
     throwIfAborted(signal);
     const preparationErrors: Error[] = [];
     const preparedWebRtc: Array<{ session: WebRtcSenderSession; offer: WebRtcSignal }> = [];
@@ -410,4 +417,3 @@ async function recoverVerifiedWinner(
     controller.abort(new DOMException("胜者恢复查询已结束。", "AbortError"));
   }
 }
-

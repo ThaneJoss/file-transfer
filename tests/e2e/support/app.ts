@@ -385,7 +385,9 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
     if (path === "/v1/diagnostics/transfers") return json({ accepted: true }, 202);
     if (path === "/v1/usage/transfers") return json({ recorded: true }, 201);
     if (path === "/v1/turn/credentials" || path === "/v1/r2/credentials" || path.startsWith("/v1/sfu/")) {
-      return json({ error: "optional route disabled in native RTC test" }, 503);
+      // Return an application-level invalid payload so optional route setup
+      // still falls back without Chromium reporting an expected HTTP error.
+      return json({ error: "optional route disabled in native RTC test" });
     }
     if (path === "/v1/pickups" && method === "POST") {
       return json({ code: "12345678", expiresAt }, 201);

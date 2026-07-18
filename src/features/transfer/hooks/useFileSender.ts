@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { TransferMethod, TransferMode } from "../protocol/fileProtocol";
 import { clearTransferEncryptionResume, createTransferEncryption } from "../crypto/fileEncryption";
+import { sha256Blob } from "../protocol/fileStream";
 import { runMultipathSender } from "../services/multipathTransfer";
 import type { RouteStates } from "../services/multipathTransfer";
 import { cancelPickup } from "../services/pickupApi";
@@ -68,8 +69,16 @@ export function useFileSender() {
     setRoutes({});
     let pickupWasCreated = false;
     let createdPickupCode = "";
+    const onHashProgress = (bytes: number, total: number) => {
+      if (!lifecycle.isCurrent(operation)) return;
+      setProgress(total === 0 ? 10 : Math.min(10, bytes / total * 10));
+    };
     try {
-      const encryption = encryptionEnabled ? await createTransferEncryption(selectedFile) : null;
+      const encryption = encryptionEnabled
+        ? await createTransferEncryption(selectedFile, {
+          hashFile: () => sha256Blob(selectedFile, { signal: operation.signal, onProgress: onHashProgress }),
+        })
+        : null;
       const result = await runMultipathSender({
         file: selectedFile,
         mode,
@@ -85,10 +94,7 @@ export function useFileSender() {
             }
             else if (message.includes("传输") || message.includes("测速") || message.includes("选择")) setPhase("transferring");
           },
-          onHashProgress: (bytes, total) => {
-            if (!lifecycle.isCurrent(operation)) return;
-            setProgress(total === 0 ? 10 : Math.min(10, bytes / total * 10));
-          },
+          onHashProgress,
           onProgress: (bytes, total) => {
             if (!lifecycle.isCurrent(operation)) return;
             const next = total === 0 ? 100 : Math.min(100, bytes / total * 100);
