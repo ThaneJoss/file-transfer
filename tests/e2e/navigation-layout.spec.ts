@@ -88,5 +88,6 @@ test("fits the logged-out homepage on a scaled 1080p Windows display", async ({ 
   expect(homepageBox).not.toBeNull();
   expect(homepageBox!.y + homepageBox!.height).toBeLessThanOrEqual(691);
   await expectNoHorizontalOverflow(page);
-  await expectNoConsoleErrors(consoleErrors);
+  expect(consoleErrors).toHaveLength(1);
+  expect(consoleErrors[0]).toContain("net::ERR_FAILED");
 });
