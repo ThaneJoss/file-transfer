@@ -35,3 +35,30 @@ for (const viewport of [
     await expectNoConsoleErrors(consoleErrors);
   });
 }
+
+test("fits the complete signed-in homepage in a 1080p desktop browser window", async ({ page }) => {
+  // A maximized browser on a 1920x1080 display leaves roughly 900 CSS pixels
+  // after the tab strip, toolbar, and operating-system chrome are accounted for.
+  await page.setViewportSize({ width: 1920, height: 900 });
+  const consoleErrors = collectConsoleErrors(page);
+  await installAppMocks(page);
+  await page.goto("/");
+
+  const homepage = page.getByTestId("unified-transfer-page");
+  await expect(homepage).toBeVisible();
+  await expect(page.getByTestId("upload-dropzone")).toBeInViewport();
+
+  const pageSlotMetrics = await page.getByTestId("page-slot").evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+  }));
+  expect(pageSlotMetrics.scrollTop).toBe(0);
+  expect(pageSlotMetrics.scrollHeight).toBeLessThanOrEqual(pageSlotMetrics.clientHeight + 1);
+
+  const homepageBox = await homepage.boundingBox();
+  expect(homepageBox).not.toBeNull();
+  expect(homepageBox!.y + homepageBox!.height).toBeLessThanOrEqual(901);
+  await expectNoHorizontalOverflow(page);
+  await expectNoConsoleErrors(consoleErrors);
+});

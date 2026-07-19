@@ -65,3 +65,72 @@ button {
     scrollbar-gutter: auto;
   }
 }
+
+/*
+ * A 1080p display usually leaves about 900px of CSS viewport height after the
+ * browser chrome is accounted for. Keep the signed-in upload landing state in
+ * that first viewport while preserving the roomier layout on smaller screens,
+ * where scrolling is expected.
+ */
+@media (min-width: 1280px) and (min-height: 800px) {
+  :root {
+    --app-page-y-padding: 14px;
+  }
+
+  .app-header {
+    margin-bottom: 10px;
+  }
+
+  .home-transfer-page {
+    max-width: 72rem;
+    gap: 12px;
+    padding-bottom: 0;
+  }
+
+  .home-transfer-hero {
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .home-transfer-title {
+    line-height: 1.15;
+  }
+
+  .home-transfer-subtitle {
+    margin-top: 4px;
+  }
+
+  .home-transfer-mode {
+    padding: 4px;
+  }
+
+  .home-transfer-mode > button {
+    min-height: 44px;
+  }
+
+  .home-transfer-panel {
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .home-upload-mode > button {
+    padding-block: 8px;
+  }
+
+  .home-encryption {
+    padding: 12px;
+  }
+
+  .home-encryption > span > span {
+    line-height: 1.4;
+  }
+
+  .home-upload-dropzone {
+    min-height: 180px;
+    padding: 16px;
+  }
+
+  .home-upload-dropzone-content {
+    gap: 12px;
+  }
+}

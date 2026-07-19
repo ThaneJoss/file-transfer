@@ -55,11 +55,11 @@ export function FileTransferPage() {
   };
 
   return (
-    <div className="mx-auto grid w-full max-w-5xl gap-5 pb-6" data-testid="unified-transfer-page">
-      <section className="grid gap-4 rounded-2xl border border-[#d7e5f6] bg-gradient-to-br from-white to-[#edf6ff] p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-7">
+    <div className="home-transfer-page mx-auto grid w-full max-w-5xl gap-5 pb-6" data-testid="unified-transfer-page">
+      <section className="home-transfer-hero grid gap-4 rounded-2xl border border-[#d7e5f6] bg-gradient-to-br from-white to-[#edf6ff] p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-7">
         <div>
-          <h1 className="text-[clamp(24px,4vw,34px)] font-black tracking-[-0.025em] text-[#061b3a]">传文件，只需要一个取件码</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#526c92] sm:text-base">
+          <h1 className="home-transfer-title text-[clamp(24px,4vw,34px)] font-black tracking-[-0.025em] text-[#061b3a]">传文件，只需要一个取件码</h1>
+          <p className="home-transfer-subtitle mt-2 max-w-2xl text-sm leading-6 text-[#526c92] sm:text-base">
             选择文件先生成 8 位取件码；对方输入后自动测速并开始传输，完成时校验文件大小和 SHA-256。
           </p>
         </div>
@@ -68,7 +68,7 @@ export function FileTransferPage() {
         </span>
       </section>
 
-      <div className="grid grid-cols-2 rounded-xl border border-[#d7e5f6] bg-white p-1.5" aria-label="选择操作">
+      <div className="home-transfer-mode grid grid-cols-2 rounded-xl border border-[#d7e5f6] bg-white p-1.5" aria-label="选择操作">
         <ModeButton active={mode === "upload"} icon={UploadCloud} label="上传文件" onClick={() => switchMode("upload")} testId="transfer-mode-upload" />
         <ModeButton active={mode === "download"} icon={Download} label="下载文件" onClick={() => switchMode("download")} testId="transfer-mode-download" />
       </div>
@@ -173,14 +173,14 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
   };
 
   return (
-    <Panel className="grid gap-5 p-5 sm:p-7" testId="upload-panel">
+    <Panel className="home-transfer-panel grid gap-5 p-5 sm:p-7" testId="upload-panel">
       <div>
         <h2 className="text-2xl font-black text-[#061b3a]">上传文件</h2>
         <p className="mt-1 text-sm text-[#526c92]">选择文件并生成取件码；接收方加入前不会发送文件正文。</p>
       </div>
 
       {!sender.pickupCode && (
-        <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#edf3fb] p-1.5" aria-label="传输模式">
+        <div className="home-upload-mode grid grid-cols-2 gap-2 rounded-xl bg-[#edf3fb] p-1.5" aria-label="传输模式">
           <button
             className={`rounded-lg px-3 py-3 text-sm font-extrabold ${sender.mode === "auto" ? "bg-white text-[#1677ff] shadow-sm" : "text-[#526c92]"}`}
             type="button"
@@ -207,7 +207,7 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
       )}
 
       {!sender.pickupCode && (
-        <label className="flex items-start gap-3 rounded-xl border border-[#b9d7ff] bg-[#f7fbff] p-4">
+        <label className="home-encryption flex items-start gap-3 rounded-xl border border-[#b9d7ff] bg-[#f7fbff] p-4">
           <input
             className="mt-1 size-4 accent-[#1677ff]"
             type="checkbox"
@@ -233,7 +233,7 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
 
       {!sender.pickupCode && (
         <div
-          className={`grid min-h-[240px] place-items-center rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
+          className={`home-upload-dropzone grid min-h-[240px] place-items-center rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
             sender.busy ? "border-[#c7d5e8] bg-[#f7f9fc]" : "border-[#b9d7ff] bg-[#f7fbff] hover:border-[#1677ff]"
           }`}
           onDragOver={(event) => event.preventDefault()}
@@ -247,7 +247,7 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
             disabled={sender.busy}
             onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
           />
-          <div className="grid justify-items-center gap-4">
+          <div className="home-upload-dropzone-content grid justify-items-center gap-4">
             <span className="grid size-16 place-items-center rounded-2xl bg-[#eaf2ff] text-[#1677ff]">
               <HardDrive aria-hidden="true" size={30} />
             </span>
@@ -345,7 +345,7 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
 
 function DownloadView({ receiver, guest }: { receiver: ReturnType<typeof useFileReceiver>; guest: boolean }) {
   return (
-    <Panel className="grid gap-5 p-5 sm:p-7" testId="download-panel">
+    <Panel className="home-transfer-panel grid gap-5 p-5 sm:p-7" testId="download-panel">
       <div>
         <h2 className="text-2xl font-black text-[#061b3a]">下载文件</h2>
         <p className="mt-1 text-sm text-[#526c92]">输入 8 位取件码，一次完成连接、测速、接收和完整性校验。</p>
