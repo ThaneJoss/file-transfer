@@ -67,12 +67,11 @@ button {
 }
 
 /*
- * A 1080p display usually leaves about 900px of CSS viewport height after the
- * browser chrome is accounted for. Keep the signed-in upload landing state in
- * that first viewport while preserving the roomier layout on smaller screens,
- * where scrolling is expected.
+ * A 1080p display can expose roughly 690-900px of CSS viewport height depending
+ * on Windows display scaling and browser chrome. Apply the compact rhythm from
+ * desktop width alone so scaled 1920x1080 screens receive it as well.
  */
-@media (min-width: 1280px) and (min-height: 800px) {
+@media (min-width: 1280px) {
   :root {
     --app-page-y-padding: 14px;
   }
