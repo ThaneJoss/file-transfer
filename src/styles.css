@@ -65,3 +65,71 @@ button {
     scrollbar-gutter: auto;
   }
 }
+
+/*
+ * A 1080p display can expose roughly 690-900px of CSS viewport height depending
+ * on Windows display scaling and browser chrome. Apply the compact rhythm from
+ * desktop width alone so scaled 1920x1080 screens receive it as well.
+ */
+@media (min-width: 1280px) {
+  :root {
+    --app-page-y-padding: 14px;
+  }
+
+  .app-header {
+    margin-bottom: 10px;
+  }
+
+  .home-transfer-page {
+    max-width: 72rem;
+    gap: 12px;
+    padding-bottom: 0;
+  }
+
+  .home-transfer-hero {
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .home-transfer-title {
+    line-height: 1.15;
+  }
+
+  .home-transfer-subtitle {
+    margin-top: 4px;
+  }
+
+  .home-transfer-mode {
+    padding: 4px;
+  }
+
+  .home-transfer-mode > button {
+    min-height: 44px;
+  }
+
+  .home-transfer-panel {
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .home-upload-mode > button {
+    padding-block: 8px;
+  }
+
+  .home-encryption {
+    padding: 12px;
+  }
+
+  .home-encryption > span > span {
+    line-height: 1.4;
+  }
+
+  .home-upload-dropzone {
+    min-height: 180px;
+    padding: 16px;
+  }
+
+  .home-upload-dropzone-content {
+    gap: 12px;
+  }
+}

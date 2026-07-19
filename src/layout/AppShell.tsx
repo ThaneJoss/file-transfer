@@ -21,7 +21,7 @@ export function AppShell({
       data-testid="app-shell"
     >
       <header
-        className="mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(0,auto)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
+        className="app-header mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(0,auto)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
         data-testid="app-header"
       >
         <Link
