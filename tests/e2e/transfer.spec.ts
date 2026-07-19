@@ -9,6 +9,7 @@ import {
 } from "./support/app";
 
 const helloSha256 = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+const probeSha256 = "ba9c736f19e7f60b7f6764adb0b7908c0a2b394e09b6c09863528c7f2bc86095";
 
 function transferDescriptor(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -54,7 +55,7 @@ function multipathDescriptor(mode: "auto" | "turbo") {
       downloadUrl: "https://example-account.r2.cloudflarestorage.com/demo-bucket/users/server/hello.txt?X-Amz-Signature=fake",
       expiresAt: Date.now() + 3_600_000,
       probeSize: 5,
-      probeSha256: helloSha256,
+      probeSha256,
     }],
   });
 }
@@ -79,6 +80,10 @@ test.describe("unified file transfer", () => {
     await page.getByRole("button", { name: "生成取件码" }).click();
     await expect(page.getByTestId("pickup-code")).toHaveText("12345678");
 
+    await page.getByRole("button", { name: "复制分享链接" }).click();
+    const shareUrl = await page.evaluate(() => window.__appTest.clipboardText);
+    expect(shareUrl).toContain("?code=12345678#key=");
+
     expect(mocks.getPostedVariant()).toBe("multipath");
     expect(mocks.getPostedOffer()).toBe("");
     mocks.releaseR2Credentials();
@@ -87,12 +92,18 @@ test.describe("unified file transfer", () => {
     expect(mocks.getUploadHeaders().authorization).toContain("Credential=temporary-access-key/");
 
     const payload = await decodeConnectionCodePayload(page, mocks.getPostedOffer());
-    expect(payload.kind).toBe("file-transfer-v3");
+    expect(payload.kind).toBe("file-transfer-v4");
     expect(payload.mode).toBe("auto");
     expect(payload.file).toMatchObject({ name: "hello.txt", size: 5, sha256: helloSha256 });
+    expect(payload.encryption).toMatchObject({ algorithm: "AES-GCM-256", tagBytes: 16 });
     const routes = payload.routes as Array<Record<string, unknown>>;
-    expect(routes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "r2", objectKey: "users/server/demo.txt" })]));
+    expect(routes).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: "r2",
+      objectKey: "users/server/demo.txt",
+      contentSize: 21,
+    })]));
     expect(JSON.stringify(payload)).not.toContain("temporary-secret");
+    expect(JSON.stringify(payload)).not.toContain(new URL(shareUrl).hash.slice("#key=".length));
     const downloadUrl = routes.find((route) => route.kind === "r2")?.downloadUrl;
     expect(downloadUrl).toEqual(expect.stringContaining("X-Amz-Signature="));
     expect(downloadUrl).toEqual(expect.stringContaining("X-Amz-Security-Token="));
@@ -108,6 +119,24 @@ test.describe("unified file transfer", () => {
     await expect(page.getByTestId("download-complete")).toContainText("文件已安全保存");
     await expect(page.getByTestId("receiver-file")).toContainText("hello.txt");
     await expect(page.getByTestId("receiver-file")).toContainText("完成前校验 SHA-256");
+    await expect(page.evaluate(() => window.__appTest.downloads)).resolves.toBe(1);
+  });
+
+  test("opens a share link and receives as a guest without a login", async ({ page }) => {
+    await installAppMocks(page, {
+      signedIn: false,
+      pickupVariant: "r2",
+      pickupOffer: transferDescriptor(),
+      downloadBody: "hello",
+    });
+    await page.goto("/?code=12345678");
+
+    await expect(page.getByText("访客接收已启用，无需注册账号。")).toBeVisible();
+    await expect(page.getByTestId("receiver-code")).toHaveValue("12345678");
+    await expect(page.getByTestId("receiver-file")).toContainText("hello.txt");
+    await page.getByRole("button", { name: "开始接收" }).click();
+
+    await expect(page.getByTestId("download-complete")).toContainText("文件已安全保存");
     await expect(page.evaluate(() => window.__appTest.downloads)).resolves.toBe(1);
   });
 

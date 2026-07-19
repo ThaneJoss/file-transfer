@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
 
 export const apiBaseUrl = "https://api.file.thanejoss.com";
 export const r2Origin = "https://example-account.r2.cloudflarestorage.com";
@@ -92,11 +92,11 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   });
 
   await page.addInitScript(() => {
-    window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 } };
+    window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 }, clipboardText: "" };
     Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { writeText: async () => undefined },
+      value: { writeText: async (value: string) => { window.__appTest.clipboardText = value; } },
     });
     Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
     URL.createObjectURL = () => {
@@ -218,6 +218,9 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
       }),
     }).catch(() => undefined);
   });
+  await page.route(`${apiBaseUrl}/v1/diagnostics/transfers`, (route) =>
+    route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ accepted: true }) }),
+  );
   await page.route(`${apiBaseUrl}/v1/pickups`, async (route) => {
     const body = await route.request().postDataJSON() as { offer?: string; variant: string };
     postedOffer = body.offer ?? "";
@@ -230,6 +233,28 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   });
   await page.route(`${apiBaseUrl}/v1/pickups/**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/guest")) {
+      const offer = options.pickupOffer ?? postedOffer;
+      const pickup = offer
+        ? {
+            status: "found",
+            variant: options.pickupVariant ?? (postedVariant || "multipath"),
+            offer,
+            expiresAt: Date.now() + 3_600_000,
+            answered: false,
+          }
+        : {
+            status: "pending",
+            variant: options.pickupVariant ?? (postedVariant || "multipath"),
+            expiresAt: Date.now() + 3_600_000,
+          };
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ token: "e2e-guest-token", expiresAt: Date.now() + 3_600_000, pickup }),
+      });
+      return;
+    }
     if (pathname.endsWith("/offer")) {
       const body = await route.request().postDataJSON() as { offer: string };
       postedOffer = body.offer;
@@ -311,6 +336,122 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   };
 }
 
+export async function installRealRtcTransferMocks(context: BrowserContext) {
+  let offer = "";
+  let answer = "";
+  let selection: "direct" | "stun" | null = null;
+  let winner: { route: "direct" | "stun"; bytes: number; sha256: string } | null = null;
+  let cancelled = false;
+  const expiresAt = Date.now() + 3_600_000;
+  const answerReady = deferredSignal();
+  const selectionReady = deferredSignal();
+  const winnerReady = deferredSignal();
+
+  await context.addInitScript(() => {
+    window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 }, clipboardText: "" };
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => { window.__appTest.clipboardText = value; } },
+    });
+    Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
+    URL.createObjectURL = () => {
+      window.__appTest.objectUrls.created += 1;
+      return `blob:real-rtc-${window.__appTest.objectUrls.created}`;
+    };
+    URL.revokeObjectURL = () => { window.__appTest.objectUrls.revoked += 1; };
+    HTMLAnchorElement.prototype.click = function click() { window.__appTest.downloads += 1; };
+  });
+
+  await context.route(`${apiBaseUrl}/**`, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const method = request.method();
+    const json = (body: unknown, status = 200) => route.fulfill({
+      status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+
+    if (path === "/api/auth/get-session") return json(testAuthSession());
+    if (path === "/v1/usage") {
+      return json({
+        period: { start: new Date().toISOString(), end: new Date(expiresAt).toISOString(), timezone: "UTC" },
+        summary: [],
+        totals: { bytes: 0, requests: 0 },
+        quotas: { bytes: 0, requests: 0 },
+        totalBytes: 0,
+        totalQuotaBytes: 0,
+      });
+    }
+    if (path === "/v1/diagnostics/transfers") return json({ accepted: true }, 202);
+    if (path === "/v1/usage/transfers") return json({ recorded: true }, 201);
+    if (path === "/v1/turn/credentials" || path === "/v1/r2/credentials" || path.startsWith("/v1/sfu/")) {
+      // Return an application-level invalid payload so optional route setup
+      // still falls back without Chromium reporting an expected HTTP error.
+      return json({ error: "optional route disabled in native RTC test" });
+    }
+    if (path === "/v1/pickups" && method === "POST") {
+      return json({ code: "12345678", expiresAt }, 201);
+    }
+    if (path === "/v1/pickups/12345678/offer" && method === "PUT") {
+      offer = (await request.postDataJSON() as { offer: string }).offer;
+      return json({ accepted: true });
+    }
+    if (path === "/v1/pickups/12345678/answer") {
+      if (method === "PUT") {
+        answer = (await request.postDataJSON() as { answer: string }).answer;
+        answerReady.resolve();
+        return json({ accepted: true });
+      }
+      if (!answer) await answerReady.promise;
+      return json({ answer });
+    }
+    if (path === "/v1/pickups/12345678/selection") {
+      if (method === "PUT") {
+        selection = (await request.postDataJSON() as { route: "direct" | "stun" }).route;
+        selectionReady.resolve();
+        return json({ accepted: true });
+      }
+      if (!selection) await selectionReady.promise;
+      return json({ route: selection });
+    }
+    if (path === "/v1/pickups/12345678/winner") {
+      if (method === "PUT") {
+        winner = await request.postDataJSON() as typeof winner;
+        winnerReady.resolve();
+        return json({ accepted: true });
+      }
+      if (!winner) await winnerReady.promise;
+      return json(winner);
+    }
+    if (path === "/v1/pickups/12345678/status") return json({ cancelled, expiresAt });
+    if (path === "/v1/pickups/12345678/cancel" && method === "PUT") {
+      cancelled = true;
+      return json({ cancelled: true });
+    }
+    if (path === "/v1/pickups/12345678") {
+      return offer
+        ? json({ status: "found", variant: "multipath", offer, expiresAt, answered: Boolean(answer) })
+        : json({ status: "pending", variant: "multipath", expiresAt }, 202);
+    }
+    return json({ error: "not mocked" }, 404);
+  });
+
+  return {
+    getOffer: () => offer,
+    getSelection: () => selection,
+    getWinner: () => winner,
+  };
+}
+
+function deferredSignal() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 export function collectConsoleErrors(page: Page) {
   const errors: string[] = [];
   page.on("console", (message) => {
@@ -361,6 +502,7 @@ declare global {
     __appTest: {
       downloads: number;
       objectUrls: { created: number; revoked: number };
+      clipboardText: string;
     };
   }
 }

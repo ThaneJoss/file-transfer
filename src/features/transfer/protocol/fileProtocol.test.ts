@@ -9,6 +9,7 @@ import {
   encodeTransferAnswer,
   encodeTransferDescriptor,
   encodeTransferOffer,
+  encryptedFileTransferProtocolKind,
   fileTransferAnswerKind,
   fileTransferProtocolKind,
   legacyFileTransferProtocolKind,
@@ -81,6 +82,41 @@ describe("file transfer protocol", () => {
       metrics: { r2: { bytes: 5, elapsedMs: 12 } },
     };
     await expect(decodeTransferAnswer(await encodeTransferAnswer(answer))).resolves.toEqual(answer);
+  });
+
+  it("round trips v4 encryption metadata without embedding the secret key", async () => {
+    const encryptedOffer: MultipathTransferOffer = {
+      ...multipathOffer,
+      kind: encryptedFileTransferProtocolKind,
+      encryption: {
+        algorithm: "AES-GCM-256",
+        keyId: "ab".repeat(32),
+        noncePrefix: "AQIDBAUGBwg",
+        tagBytes: 16,
+      },
+      routes: multipathOffer.routes.map((route) => route.kind === "r2"
+        ? { ...route, contentSize: multipathOffer.file.size + 16 }
+        : route),
+    };
+    const encoded = await encodeTransferOffer(encryptedOffer);
+
+    await expect(decodeTransferOffer(encoded)).resolves.toEqual(encryptedOffer);
+    expect(encoded).not.toContain("secret");
+  });
+
+  it("rejects v4 R2 offers that omit the encrypted object size", async () => {
+    const invalid = {
+      ...multipathOffer,
+      kind: encryptedFileTransferProtocolKind,
+      encryption: {
+        algorithm: "AES-GCM-256",
+        keyId: "ab".repeat(32),
+        noncePrefix: "AQIDBAUGBwg",
+        tagBytes: 16,
+      },
+    } as MultipathTransferOffer;
+
+    await expect(encodeTransferOffer(invalid)).rejects.toThrow("文件传输协议格式不正确");
   });
 
   it("allows unavailable routes but rejects duplicate route identities", async () => {

@@ -70,6 +70,8 @@ jobs:
             specs: tests/e2e/transfer.spec.ts
           - group: auth
             specs: tests/e2e/auth.spec.ts
+          - group: real-rtc
+            specs: tests/e2e/real-rtc.spec.ts
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,6 +1,7 @@
 import { decodeConnectionPayload, encodeConnectionPayload } from "./connectionCode";
 
 export const fileTransferProtocolKind = "file-transfer-v3" as const;
+export const encryptedFileTransferProtocolKind = "file-transfer-v4" as const;
 export const fileTransferAnswerKind = "file-transfer-answer-v3" as const;
 export const legacyFileTransferProtocolKind = "file-transfer-v2" as const;
 export const r2RouteKind = "r2" as const;
@@ -42,17 +43,26 @@ export type R2RouteOffer = {
   expiresAt: number;
   probeSize: number;
   probeSha256: string;
+  contentSize?: number;
 };
 
 export type TransferRouteOffer = WebRtcRouteOffer | SfuRouteOffer | R2RouteOffer;
 
+export type TransferEncryptionMetadata = {
+  algorithm: "AES-GCM-256";
+  keyId: string;
+  noncePrefix: string;
+  tagBytes: 16;
+};
+
 export type MultipathTransferOffer = {
-  kind: typeof fileTransferProtocolKind;
+  kind: typeof fileTransferProtocolKind | typeof encryptedFileTransferProtocolKind;
   transferId: string;
   mode: TransferMode;
   createdAt: number;
   file: TransferFileManifest & { sha256: string; chunkSize: number; totalChunks: number };
   routes: TransferRouteOffer[];
+  encryption?: TransferEncryptionMetadata;
 };
 
 export type WebRtcRouteAnswer = {
@@ -165,7 +175,10 @@ export function createR2TransferDescriptor({
 }
 
 export function assertMultipathTransferOffer(value: unknown): asserts value is MultipathTransferOffer {
-  if (!isRecord(value) || value.kind !== fileTransferProtocolKind) throw protocolError();
+  if (
+    !isRecord(value) ||
+    (value.kind !== fileTransferProtocolKind && value.kind !== encryptedFileTransferProtocolKind)
+  ) throw protocolError();
   if (
     !isUuid(value.transferId) ||
     (value.mode !== "auto" && value.mode !== "turbo") ||
@@ -175,6 +188,8 @@ export function assertMultipathTransferOffer(value: unknown): asserts value is M
   ) throw protocolError();
 
   assertFileManifest(value.file, true);
+  if (value.kind === encryptedFileTransferProtocolKind) assertEncryption(value.encryption);
+  else if (value.encryption !== undefined) throw protocolError();
   if (value.routes.length < 1 || value.routes.length > transferMethods.length) throw protocolError();
   const seen = new Set<string>();
   for (const route of value.routes) {
@@ -186,6 +201,7 @@ export function assertMultipathTransferOffer(value: unknown): asserts value is M
       if (!isRecord(route.descriptor) || encodedLength(route.descriptor) > 64_000) throw protocolError();
     } else if (route.kind === "r2") {
       assertR2Route(route);
+      if (value.kind === encryptedFileTransferProtocolKind && !isNonNegativeSafeInteger(route.contentSize)) throw protocolError();
     } else {
       throw protocolError();
     }
@@ -272,9 +288,21 @@ function assertR2Route(route: Record<string, unknown>) {
     typeof route.downloadUrl !== "string" || route.downloadUrl.length > 8192 ||
     !isPositiveSafeInteger(route.expiresAt) ||
     !isNonNegativeSafeInteger(route.probeSize) || (route.probeSize as number) > 1024 * 1024 ||
-    !isSha256(route.probeSha256)
+    !isSha256(route.probeSha256) ||
+    (route.contentSize !== undefined && !isNonNegativeSafeInteger(route.contentSize))
   ) throw protocolError();
   assertHttpsUrl(route.downloadUrl);
+}
+
+function assertEncryption(value: unknown): asserts value is TransferEncryptionMetadata {
+  if (
+    !isRecord(value) ||
+    value.algorithm !== "AES-GCM-256" ||
+    !isSha256(value.keyId) ||
+    typeof value.noncePrefix !== "string" ||
+    !/^[A-Za-z0-9_-]{11}$/.test(value.noncePrefix) ||
+    value.tagBytes !== 16
+  ) throw protocolError();
 }
 
 function normalizeLegacyR2Descriptor(value: LegacyR2Descriptor): R2TransferDescriptor {

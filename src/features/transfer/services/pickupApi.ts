@@ -1,4 +1,12 @@
-import { ApiError, apiJson, apiRequest, notifyApiUsageChanged } from "../../../lib/api/client";
+import {
+  ApiError,
+  apiJson,
+  apiRequest,
+  clearPickupGuestAuth,
+  hasPickupGuestAuth,
+  notifyApiUsageChanged,
+  setPickupGuestAuth,
+} from "../../../lib/api/client";
 import type { TransferMethod } from "../protocol/fileProtocol";
 
 export type PickupVariant = TransferMethod | "multipath";
@@ -74,6 +82,21 @@ export async function getPickup(code: string, signal?: AbortSignal, waitMs = 0) 
   return result;
 }
 
+export async function claimPickupAsGuest(code: string, signal?: AbortSignal) {
+  const result = await apiRequest<{
+    token: string;
+    expiresAt: number;
+    pickup: PickupLookupPayload;
+  }>(`/v1/pickups/${encodeURIComponent(code)}/guest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    signal,
+  });
+  setPickupGuestAuth({ code, token: result.token, expiresAt: result.expiresAt });
+  return result.pickup;
+}
+
 export async function waitForPickupOffer(
   code: string,
   signal?: AbortSignal,
@@ -81,14 +104,21 @@ export async function waitForPickupOffer(
     onPending?: (pickup: PendingPickupPayload) => void;
     intervalMs?: number;
     waitMs?: number;
+    allowGuest?: boolean;
   } = {},
 ) {
   const activeSignal = signal ?? new AbortController().signal;
   let expiresAt = Number.POSITIVE_INFINITY;
+  let claimedPickup: PickupLookupPayload | null = null;
+  if (options.allowGuest && !hasPickupGuestAuth(code)) {
+    clearPickupGuestAuth();
+    claimedPickup = await claimPickupAsGuest(code, activeSignal);
+  }
   while (true) {
     if (activeSignal.aborted) throw abortReason(activeSignal);
     if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
-    const pickup = await readCoordinationRetryable(() => getPickup(code, activeSignal, options.waitMs ?? 20_000));
+    const pickup = claimedPickup ?? await readCoordinationRetryable(() => getPickup(code, activeSignal, options.waitMs ?? 20_000));
+    claimedPickup = null;
     if (pickup?.status === "found") return pickup;
     if (pickup?.status === "pending") {
       expiresAt = pickup.expiresAt;
@@ -109,9 +139,10 @@ export async function submitPickupAnswer(code: string, answer: string, signal?: 
   return result;
 }
 
-export async function getPickupAnswer(code: string, signal?: AbortSignal) {
+export async function getPickupAnswer(code: string, signal?: AbortSignal, waitMs = 0) {
+  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
   const result = await apiRequest<{ answer: string | null }>(
-    `/v1/pickups/${encodeURIComponent(code)}/answer`,
+    `/v1/pickups/${encodeURIComponent(code)}/answer${waitQuery}`,
     { cache: "no-store", signal },
   );
   return result.answer;
@@ -126,9 +157,10 @@ export async function setPickupSelection(code: string, route: TransferMethod, si
   );
 }
 
-export async function getPickupSelection(code: string, signal?: AbortSignal) {
+export async function getPickupSelection(code: string, signal?: AbortSignal, waitMs = 0) {
+  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
   const result = await apiRequest<{ route: unknown }>(
-    `/v1/pickups/${encodeURIComponent(code)}/selection`,
+    `/v1/pickups/${encodeURIComponent(code)}/selection${waitQuery}`,
     { cache: "no-store", signal },
   );
   if (!isTransferMethod(result.route)) throw new Error("取件线路响应格式不正确。");
@@ -144,9 +176,10 @@ export async function setPickupWinner(code: string, winner: PickupWinner, signal
   );
 }
 
-export async function getPickupWinner(code: string, signal?: AbortSignal) {
+export async function getPickupWinner(code: string, signal?: AbortSignal, waitMs = 0) {
+  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
   const result = await apiRequest<Partial<PickupWinner>>(
-    `/v1/pickups/${encodeURIComponent(code)}/winner`,
+    `/v1/pickups/${encodeURIComponent(code)}/winner${waitQuery}`,
     { cache: "no-store", signal },
   );
   if (
@@ -166,9 +199,10 @@ export async function cancelPickup(code: string, signal?: AbortSignal) {
   );
 }
 
-export async function getPickupStatus(code: string, signal?: AbortSignal): Promise<PickupStatus> {
+export async function getPickupStatus(code: string, signal?: AbortSignal, waitMs = 0): Promise<PickupStatus> {
+  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
   const result = await apiRequest<Partial<PickupStatus>>(
-    `/v1/pickups/${encodeURIComponent(code)}/status`,
+    `/v1/pickups/${encodeURIComponent(code)}/status${waitQuery}`,
     { cache: "no-store", signal },
   );
   if (typeof result.cancelled !== "boolean" || !Number.isSafeInteger(result.expiresAt) || (result.expiresAt as number) <= 0) {
@@ -178,15 +212,15 @@ export async function getPickupStatus(code: string, signal?: AbortSignal): Promi
 }
 
 export async function pollPickupAnswer(code: string, signal: AbortSignal, expiresAt?: number) {
-  return pollPending(() => getPickupAnswer(code, signal), signal, expiresAt);
+  return pollPending(() => getPickupAnswer(code, signal, 20_000), signal, expiresAt);
 }
 
 export async function pollPickupSelection(code: string, signal: AbortSignal, expiresAt?: number) {
-  return pollPending(() => pending404(() => getPickupSelection(code, signal)), signal, expiresAt);
+  return pollPending(() => pending404(() => getPickupSelection(code, signal, 20_000)), signal, expiresAt);
 }
 
 export async function pollPickupWinner(code: string, signal: AbortSignal, expiresAt?: number) {
-  return pollPending(() => pending404(() => getPickupWinner(code, signal)), signal, expiresAt);
+  return pollPending(() => pending404(() => getPickupWinner(code, signal, 20_000)), signal, expiresAt);
 }
 
 export async function watchPickupSelections(
@@ -199,12 +233,12 @@ export async function watchPickupSelections(
   while (true) {
     if (signal.aborted) throw abortReason(signal);
     if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
-    const selection = await readCoordinationRetryable(() => pending404(() => getPickupSelection(code, signal)));
+    const selection = await readCoordinationRetryable(() => pending404(() => getPickupSelection(code, signal, 20_000)));
     if (selection && selection.route !== previous) {
       previous = selection.route;
       await onSelection(selection);
     }
-    await abortableDelay(850, signal);
+    await abortableDelay(100, signal);
   }
 }
 
@@ -216,9 +250,9 @@ export async function monitorPickupCancellation(
   while (true) {
     if (signal.aborted) throw abortReason(signal);
     if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
-    const status = await readCoordinationRetryable(() => getPickupStatus(code, signal));
+    const status = await readCoordinationRetryable(() => getPickupStatus(code, signal, 20_000));
     if (status?.cancelled) throw new Error("另一端已取消传输。");
-    await abortableDelay(850, signal);
+    await abortableDelay(100, signal);
   }
 }
 
@@ -226,7 +260,7 @@ async function pollPending<T>(
   read: () => Promise<T | null>,
   signal: AbortSignal,
   expiresAt = Number.POSITIVE_INFINITY,
-  intervalMs = 850,
+  intervalMs = 100,
 ): Promise<T> {
   while (true) {
     if (signal.aborted) throw abortReason(signal);

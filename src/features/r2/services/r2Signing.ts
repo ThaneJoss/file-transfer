@@ -97,14 +97,16 @@ export async function signedR2Request({
   payloadHash,
   contentType,
   body,
+  query,
   now,
 }: {
   credentials: R2Credentials;
-  method: "GET" | "HEAD" | "PUT";
+  method: "GET" | "HEAD" | "PUT" | "POST" | "DELETE";
   objectKey: string;
   payloadHash: string;
   contentType?: string;
   body?: BodyInit | null;
+  query?: Record<string, string>;
   now?: Date;
 }) {
   const { bucket } = assertCompleteCredentials(credentials);
@@ -112,7 +114,9 @@ export async function signedR2Request({
     "Content-Type": contentType || "application/octet-stream",
     "x-amz-content-sha256": payloadHash,
   });
-  const request = await r2Client(credentials).sign(r2ObjectUrl(credentials, objectKey), {
+  const url = new URL(r2ObjectUrl(credentials, objectKey));
+  for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, value);
+  const request = await r2Client(credentials).sign(url, {
     method,
     headers,
     body,

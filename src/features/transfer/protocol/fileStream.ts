@@ -45,6 +45,19 @@ export async function sha256Blob(
     onProgress?: (bytes: number, total: number) => void;
   } = {},
 ) {
+  if (typeof Worker === "function" && blob.size >= 8 * 1024 * 1024) {
+    return sha256BlobInWorker(blob, options);
+  }
+  return sha256BlobOnMainThread(blob, options);
+}
+
+export async function sha256BlobOnMainThread(
+  blob: Blob,
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (bytes: number, total: number) => void;
+  } = {},
+) {
   const hash = createSha256Hasher();
   let offset = 0;
   options.onProgress?.(0, blob.size);
@@ -60,6 +73,44 @@ export async function sha256Blob(
 
   throwIfAborted(options.signal);
   return hash.digestHex();
+}
+
+function sha256BlobInWorker(
+  blob: Blob,
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (bytes: number, total: number) => void;
+  },
+) {
+  return new Promise<string>((resolve, reject) => {
+    const worker = new Worker(new URL("../workers/hash.worker.ts", import.meta.url), { type: "module" });
+    let settled = false;
+    const finish = (error?: Error, digest?: string) => {
+      if (settled) return;
+      settled = true;
+      options.signal?.removeEventListener("abort", onAbort);
+      worker.terminate();
+      if (error) reject(error); else resolve(digest!);
+    };
+    const onAbort = () => finish(
+      options.signal?.reason instanceof Error
+        ? options.signal.reason
+        : new DOMException("操作已取消。", "AbortError"),
+    );
+    if (options.signal?.aborted) {
+      onAbort();
+      return;
+    }
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    options.onProgress?.(0, blob.size);
+    worker.onmessage = (event: MessageEvent<{ kind: "progress"; bytes: number } | { kind: "complete"; digest: string } | { kind: "error"; message: string }>) => {
+      if (event.data.kind === "progress") options.onProgress?.(event.data.bytes, blob.size);
+      else if (event.data.kind === "complete") finish(undefined, event.data.digest);
+      else finish(new Error(event.data.message));
+    };
+    worker.onerror = (event) => finish(new Error(event.message || "后台文件校验失败。"));
+    worker.postMessage({ blob, chunkSize: hashReadSize });
+  });
 }
 
 export function supportsFileSystemReceive() {

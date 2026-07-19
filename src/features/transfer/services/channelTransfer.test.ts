@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { encodeControlMessage, encodeFileFrame } from "../protocol/fileFrames";
-import { fileTransferProtocolKind } from "../protocol/fileProtocol";
+import { createTransferEncryption, encryptTransferChunk } from "../crypto/fileEncryption";
+import { encryptedFileTransferProtocolKind, fileTransferProtocolKind } from "../protocol/fileProtocol";
 import type { MultipathTransferOffer } from "../protocol/fileProtocol";
 import { MultipathChannelReceiver } from "./channelTransfer";
 
@@ -100,6 +101,65 @@ describe("multipath channel receiver", () => {
 
     await expect(receiver.completion).resolves.toMatchObject({ route: "r2", bytes: 5, sha256: helloSha256 });
     expect(writable.close).toHaveBeenCalledOnce();
+  });
+
+  it("decrypts and verifies authenticated v4 chunks before writing them", async () => {
+    const encryption = await createTransferEncryption();
+    const offer: MultipathTransferOffer = {
+      kind: encryptedFileTransferProtocolKind,
+      transferId: "123e4567-e89b-42d3-a456-426614174051",
+      mode: "auto",
+      createdAt: 1,
+      file: {
+        id: "123e4567-e89b-42d3-a456-426614174052",
+        name: "hello.txt",
+        size: 5,
+        type: "text/plain",
+        lastModified: 1,
+        sha256: helloSha256,
+        chunkSize: 48 * 1024,
+        totalChunks: 1,
+      },
+      routes: [{
+        kind: "r2",
+        objectKey: "users/test/hello.txt",
+        downloadUrl: "https://example.r2.cloudflarestorage.com/bucket/hello.txt?signature=test",
+        expiresAt: Date.now() + 60_000,
+        probeSize: 5,
+        probeSha256: helloSha256,
+        contentSize: 21,
+      }],
+      encryption: encryption.metadata,
+    };
+    const writes: Uint8Array[] = [];
+    const writable = {
+      write: vi.fn(async (value: ArrayBuffer) => writes.push(new Uint8Array(value))),
+      close: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+    };
+    const target = {
+      kind: "file-system" as const,
+      handle: { name: "hello.txt", createWritable: async () => writable } as unknown as FileSystemFileHandle,
+    };
+    const receiver = new MultipathChannelReceiver(
+      offer,
+      target,
+      new AbortController().signal,
+      undefined,
+      encryption.key,
+    );
+    receiver.startExternalRoute("r2");
+    const ciphertext = await encryptTransferChunk(
+      encryption.key,
+      encryption.metadata,
+      0,
+      new TextEncoder().encode("hello"),
+    );
+    await receiver.acceptExternalChunk("r2", 0, ciphertext);
+    await receiver.completeExternalRoute("r2");
+
+    await expect(receiver.completion).resolves.toMatchObject({ route: "r2", bytes: 5, sha256: helloSha256 });
+    expect(new TextDecoder().decode(writes[0])).toBe("hello");
   });
 
   it("does not fail while another offered route is still pending", async () => {
