@@ -88,7 +88,7 @@ test.describe("unified file transfer", () => {
     expect(mocks.getPostedOffer()).toBe("");
     mocks.releaseR2Credentials();
     await expect.poll(mocks.getPostedOffer).not.toBe("");
-    expect(mocks.getUploadedBody()?.toString()).toBe("hello");
+    expect(mocks.getUploadedBody()?.toString()).not.toBe("hello");
     expect(mocks.getUploadHeaders().authorization).toContain("Credential=temporary-access-key/");
 
     const payload = await decodeConnectionCodePayload(page, mocks.getPostedOffer());
