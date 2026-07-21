@@ -1,8 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
 import type { TransferMethod, TransferMode } from "../protocol/fileProtocol";
-import { clearTransferEncryptionResume, createTransferEncryption } from "../crypto/fileEncryption";
-import { sha256Blob } from "../protocol/fileStream";
 import { runMultipathSender } from "../services/multipathTransfer";
 import type { RouteStates } from "../services/multipathTransfer";
 import { cancelPickup } from "../services/pickupApi";
@@ -16,7 +14,6 @@ export function useFileSender() {
   const diagnosticRef = useRef<TransferDiagnosticSession | null>(null);
   const [file, setFileState] = useState<File | null>(null);
   const [mode, setModeState] = useState<TransferMode>("auto");
-  const [encryptionEnabled, setEncryptionEnabled] = useState(true);
   const [phase, setPhase] = useState<SenderPhase>("idle");
   const [status, setStatus] = useState("选择一个文件后生成取件码。");
   const [error, setError] = useState("");
@@ -74,16 +71,10 @@ export function useFileSender() {
       setProgress(total === 0 ? 10 : Math.min(10, bytes / total * 10));
     };
     try {
-      const encryption = encryptionEnabled
-        ? await createTransferEncryption(selectedFile, {
-          hashFile: () => sha256Blob(selectedFile, { signal: operation.signal, onProgress: onHashProgress }),
-        })
-        : null;
       const result = await runMultipathSender({
         file: selectedFile,
         mode,
         signal: operation.signal,
-        encryption,
         callbacks: {
           onStatus: (message) => {
             if (!lifecycle.isCurrent(operation)) return;
@@ -110,7 +101,6 @@ export function useFileSender() {
             url.search = "";
             url.hash = "";
             url.searchParams.set("code", pickup.code);
-            if (encryption) url.hash = new URLSearchParams({ key: encryption.secret }).toString();
             setShareUrl(url.toString());
           },
           onRoutes: (nextRoutes) => {
@@ -124,7 +114,6 @@ export function useFileSender() {
       setWinner(result.winner.route);
       setProgress(100);
       setPhase("complete");
-      clearTransferEncryptionResume(encryption);
       void diagnostic.flush({ side: "sender", outcome: "complete", mode, winner: result.winner.route });
       lifecycle.finish(operation);
     } catch (caught) {
@@ -141,7 +130,7 @@ export function useFileSender() {
       void diagnostic.flush({ side: "sender", outcome: "error", mode, error: caught });
       lifecycle.finish(operation);
     }
-  }, [encryptionEnabled, file, lifecycle, mode]);
+  }, [file, lifecycle, mode]);
 
   const cancel = useCallback(() => {
     if (pickupCode) void cancelPickup(pickupCode).catch(() => undefined);
@@ -159,7 +148,7 @@ export function useFileSender() {
   const busy = phase === "preparing" || phase === "waiting" || phase === "transferring";
 
   return {
-    file, mode, encryptionEnabled, phase, status, error, progress, pickupCode, pickupExpiresAt, shareUrl,
-    winner, routes, supportId, busy, setFile, setMode, setEncryptionEnabled, start, cancel, reset,
+    file, mode, phase, status, error, progress, pickupCode, pickupExpiresAt, shareUrl,
+    winner, routes, supportId, busy, setFile, setMode, start, cancel, reset,
   };
 }

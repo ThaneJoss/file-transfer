@@ -116,14 +116,6 @@ button {
     padding-block: 8px;
   }
 
-  .home-encryption {
-    padding: 12px;
-  }
-
-  .home-encryption > span > span {
-    line-height: 1.4;
-  }
-
   .home-upload-dropzone {
     min-height: 180px;
     padding: 16px;

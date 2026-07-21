@@ -1,7 +1,5 @@
 import { requestR2Credentials } from "../../r2/services/r2Credentials";
 import type { R2TemporaryCredentials } from "../../r2/services/r2Credentials";
-import { encryptedTransferSize } from "../crypto/fileEncryption";
-import type { TransferEncryptionContext } from "../crypto/fileEncryption";
 import { createR2TransferDescriptor, encodeTransferDescriptor } from "../protocol/fileProtocol";
 import type { R2RouteOffer } from "../protocol/fileProtocol";
 import { createSha256Hasher, receiveVerifiedResponse, sha256Blob } from "../protocol/fileStream";
@@ -18,7 +16,6 @@ export type R2SenderSession = {
   route: R2RouteOffer;
   credentials: R2TemporaryCredentials;
   probeUploadElapsedMs: number;
-  encryption?: TransferEncryptionContext | null;
   multipartResume: { fingerprint: string; state: MultipartResumeState | null };
 };
 
@@ -27,16 +24,14 @@ const r2ProbeBytes = 64 * 1024;
 export async function prepareR2Route({
   file,
   signal,
-  encryption,
   onProgress,
 }: {
   file: File;
   signal: AbortSignal;
-  encryption?: TransferEncryptionContext | null;
   onProgress?: (message: string) => void;
 }): Promise<R2SenderSession> {
   onProgress?.("正在准备 R2 线路...");
-  const multipartResume = await loadMultipartResume(file, encryption?.metadata.keyId);
+  const multipartResume = await loadMultipartResume(file);
   const credentials = await requestR2Credentials(file.name, signal, {
     fileSizeBytes: file.size,
     ...(multipartResume.state ? { objectKey: multipartResume.state.objectKey } : {}),
@@ -66,7 +61,6 @@ export async function prepareR2Route({
   return {
     credentials,
     probeUploadElapsedMs,
-    encryption,
     multipartResume,
     route: {
       kind: "r2",
@@ -75,7 +69,6 @@ export async function prepareR2Route({
       expiresAt,
       probeSize: probe.byteLength,
       probeSha256,
-      ...(encryption ? { contentSize: encryptedTransferSize(file.size, 48 * 1024, encryption.metadata.tagBytes) } : {}),
     },
   };
 }
@@ -105,12 +98,11 @@ export async function uploadR2File({
   signal: AbortSignal;
   onProgress?: (bytes: number, total: number) => void;
 }) {
-  if (file.size > 0 && (session.encryption || file.size >= 8 * 1024 * 1024)) {
+  if (file.size >= 8 * 1024 * 1024) {
     await uploadMultipartR2({
       credentials: session.credentials,
       file,
       chunkSize: 48 * 1024,
-      encryption: session.encryption,
       resume: session.multipartResume,
       signal,
       onProgress,

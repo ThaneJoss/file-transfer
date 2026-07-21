@@ -1,5 +1,4 @@
 import { saveBlob } from "../../../lib/browser/download";
-import { decryptTransferChunk, encryptTransferChunk } from "../crypto/fileEncryption";
 import { throwIfAborted } from "../hooks/useTransferLifecycle";
 import {
   decodeControlMessage,
@@ -67,14 +66,12 @@ export async function sendFileOnChannel({
   file,
   signal,
   onProgress,
-  encryptionKey,
 }: {
   route: RouteChannel;
   offer: MultipathTransferOffer;
   file: File;
   signal: AbortSignal;
   onProgress?: (bytes: number, total: number) => void;
-  encryptionKey?: CryptoKey | null;
 }) {
   throwIfAborted(signal);
   await waitForChannelOpen(route.channel, signal);
@@ -95,10 +92,7 @@ export async function sendFileOnChannel({
       await acknowledgements.waitForCredit(sequence);
       const start = sequence * offer.file.chunkSize;
       const chunk = new Uint8Array(await file.slice(start, Math.min(start + offer.file.chunkSize, offer.file.size)).arrayBuffer());
-      const payload = offer.encryption
-        ? await encryptTransferChunk(assertEncryptionKey(encryptionKey), offer.encryption, sequence, chunk)
-        : chunk;
-      await sendWithBackpressure(route.channel, encodeFileFrame("data", sequence, payload), signal);
+      await sendWithBackpressure(route.channel, encodeFileFrame("data", sequence, chunk), signal);
       sent += chunk.byteLength;
       onProgress?.(sent, offer.file.size);
     }
@@ -141,7 +135,6 @@ export class MultipathChannelReceiver {
     private readonly target: ReceiveTarget,
     private readonly signal: AbortSignal,
     private readonly onProgress?: (bytes: number, total: number) => void,
-    private readonly encryptionKey?: CryptoKey | null,
   ) {
     this.routeCandidates = new Set(offer.routes.map((route) => route.kind));
     this.completion = new Promise<ChannelReceiveResult>((resolve, reject) => {
@@ -247,9 +240,7 @@ export class MultipathChannelReceiver {
     return this.enqueue(async () => {
       if (frame.sequence < this.nextSequence) return;
       if (frame.sequence !== this.nextSequence) throw new Error("收到乱序文件分块，传输已停止。");
-      const payload = this.offer.encryption
-        ? await decryptTransferChunk(assertEncryptionKey(this.encryptionKey), this.offer.encryption, frame.sequence, frame.payload)
-        : frame.payload;
+      const payload = frame.payload;
       const expected = Math.min(this.offer.file.chunkSize, this.offer.file.size - frame.sequence * this.offer.file.chunkSize);
       if (payload.byteLength !== expected) throw new Error(`文件分块 ${frame.sequence} 大小不正确。`);
       if (!this.sink) this.sink = await openReceiveSink(this.target, this.offer.file.type);
@@ -439,10 +430,6 @@ function waitForEvent(target: EventTarget, type: string, signal: AbortSignal, ti
 }
 
 function randomUint32() { const values = new Uint32Array(1); crypto.getRandomValues(values); return values[0]; }
-function assertEncryptionKey(key: CryptoKey | null | undefined) {
-  if (!key) throw new Error("这个文件需要通过包含端到端密钥的分享链接接收。");
-  return key;
-}
 function abortReason(signal: AbortSignal) { return signal.reason instanceof Error ? signal.reason : new DOMException("操作已取消。", "AbortError"); }
 function linkedAbortController(parent: AbortSignal) {
   const controller = new AbortController();

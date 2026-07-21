@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { TransferFileManifest, TransferMethod, TransferMode } from "../protocol/fileProtocol";
-import { encryptionSecretFromHash } from "../crypto/fileEncryption";
 import { chooseInitialReceiveTarget, inspectPickupFile, runMultipathReceiver } from "../services/multipathTransfer";
 import type { RouteStates } from "../services/multipathTransfer";
 import { cancelPickup } from "../services/pickupApi";
@@ -14,7 +13,6 @@ export type ReceiverPhase = "idle" | "connecting" | "receiving" | "complete" | "
 export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allowGuest?: boolean; initialCode?: string } = {}) {
   const lifecycle = useTransferLifecycle();
   const diagnosticRef = useRef<TransferDiagnosticSession | null>(null);
-  const [encryptionSecret] = useState(() => encryptionSecretFromHash());
   const [code, setCodeState] = useState(() => initialCode.replace(/\D/g, "").slice(0, 8));
   const [descriptor, setDescriptor] = useState<TransferFileManifest | null>(null);
   const [transferMode, setTransferMode] = useState<TransferMode | "legacy" | null>(null);
@@ -29,7 +27,6 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
   const [metadataPending, setMetadataPending] = useState(false);
   const [routes, setRoutes] = useState<RouteStates>({});
   const [supportId, setSupportId] = useState("");
-  const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const busy = phase === "connecting" || phase === "receiving";
 
   useEffect(() => {
@@ -41,12 +38,11 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
     setStatus("正在读取取件码中的文件信息...");
     void inspectPickupFile(code, controller.signal, () => {
       if (!controller.signal.aborted) setStatus("取件码已生成，发送端正在准备文件和线路...");
-    }, allowGuest, encryptionSecret).then(({ pickup, file, mode, encryptionKey: inspectedKey }) => {
+    }, allowGuest).then(({ pickup, file, mode }) => {
       if (controller.signal.aborted) return;
       setPreparedPickup(pickup);
       setDescriptor(file);
       setTransferMode(mode);
-      setEncryptionKey(inspectedKey);
       setStatus(mode === "turbo"
         ? `将接收 ${file.name}，点击开始后会并发使用五条可用线路。`
         : `将接收 ${file.name}，点击开始后自动选择最快线路。`);
@@ -55,14 +51,13 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
       setPreparedPickup(null);
       setDescriptor(null);
       setTransferMode(null);
-      setEncryptionKey(null);
       setError(caught instanceof Error ? caught.message : "无法读取这个取件码。");
       setStatus("取件码不可用。");
     }).finally(() => {
       if (!controller.signal.aborted) setMetadataPending(false);
     });
     return () => controller.abort(new DOMException("取件码已更改。", "AbortError"));
-  }, [allowGuest, busy, code, encryptionSecret, preparedPickup]);
+  }, [allowGuest, busy, code, preparedPickup]);
 
   const setCode = useCallback((value: string) => {
     lifecycle.cancel("取件码已更改。");
@@ -70,7 +65,6 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
     setCodeState(normalized);
     setDescriptor(null);
     setTransferMode(null);
-    setEncryptionKey(null);
     setPhase("idle");
     setStatus(normalized ? "点击开始接收，系统会自动连接最快线路。" : "输入 8 位取件码后开始接收。");
     setError("");
@@ -124,7 +118,6 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
         target,
         signal: operation.signal,
         preparedPickup,
-        encryptionKey,
         callbacks: {
           onStatus: (message) => {
             if (!lifecycle.isCurrent(operation)) return;
@@ -168,14 +161,13 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
       setPreparedPickup(null);
       setDescriptor(null);
       setTransferMode(null);
-      setEncryptionKey(null);
       setPhase("error");
       setError(caught instanceof Error ? caught.message : "接收失败，请重试。");
       setStatus("文件没有保存，请输入新的取件码。");
       void diagnostic.flush({ side: "receiver", outcome: "error", mode: transferMode, error: caught });
       lifecycle.finish(operation);
     }
-  }, [code, descriptor, encryptionKey, lifecycle, preparedPickup, transferMode]);
+  }, [code, descriptor, lifecycle, preparedPickup, transferMode]);
 
   const cancel = useCallback(() => {
     if (busy) void cancelPickup(code).catch(() => undefined);
@@ -184,7 +176,6 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
     setPreparedPickup(null);
     setDescriptor(null);
     setTransferMode(null);
-    setEncryptionKey(null);
     setProgress(0);
     setDownloadedBytes(0);
     setPhase("cancelled");
@@ -197,7 +188,7 @@ export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allo
 
   return {
     code, descriptor, transferMode, phase, status, error, progress, downloadedBytes,
-    savedTo, winner, routes, supportId, encrypted: Boolean(encryptionKey), busy, metadataPending,
+    savedTo, winner, routes, supportId, busy, metadataPending,
     readyToReceive: Boolean(preparedPickup && descriptor),
     setCode, receive, cancel, reset,
   };

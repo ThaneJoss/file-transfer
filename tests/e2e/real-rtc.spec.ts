@@ -8,7 +8,7 @@ import {
   selectFile,
 } from "./support/app";
 
-test("transfers an encrypted file through native browser WebRTC", async ({ page }) => {
+test("transfers a file through native browser WebRTC", async ({ page }) => {
   test.setTimeout(60_000);
   const senderErrors = collectConsoleErrors(page);
   const mocks = await installRealRtcTransferMocks(page.context());
@@ -19,7 +19,7 @@ test("transfers an encrypted file through native browser WebRTC", async ({ page 
   await expect(page.getByTestId("pickup-code")).toHaveText("12345678");
   await page.getByRole("button", { name: "复制分享链接" }).click();
   const shareUrl = await page.evaluate(() => window.__appTest.clipboardText);
-  expect(shareUrl).toContain("?code=12345678#key=");
+  expect(shareUrl).toMatch(/\?code=12345678$/);
 
   const receiver = await page.context().newPage();
   const receiverErrors = collectConsoleErrors(receiver);
@@ -34,8 +34,7 @@ test("transfers an encrypted file through native browser WebRTC", async ({ page 
   expect(mocks.getWinner()).toMatchObject({ bytes: 21 });
 
   const payload = await decodeConnectionCodePayload(page, mocks.getOffer());
-  expect(payload.kind).toBe("file-transfer-v4");
-  expect(payload.encryption).toMatchObject({ algorithm: "AES-GCM-256" });
+  expect(payload.kind).toBe("file-transfer-v3");
 
   await receiver.close();
   await expectNoConsoleErrors(senderErrors);
