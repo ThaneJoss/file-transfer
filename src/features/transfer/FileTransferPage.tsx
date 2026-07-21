@@ -206,25 +206,6 @@ function UploadView({ sender }: { sender: ReturnType<typeof useFileSender> }) {
         </div>
       )}
 
-      {!sender.pickupCode && (
-        <label className="home-encryption flex items-start gap-3 rounded-xl border border-[#b9d7ff] bg-[#f7fbff] p-4">
-          <input
-            className="mt-1 size-4 accent-[#1677ff]"
-            type="checkbox"
-            checked={sender.encryptionEnabled}
-            disabled={sender.busy}
-            onChange={(event) => sender.setEncryptionEnabled(event.target.checked)}
-            data-testid="transfer-encryption"
-          />
-          <span>
-            <strong className="block text-sm text-[#061b3a]">端到端加密（推荐）</strong>
-            <span className="mt-1 block text-xs leading-5 text-[#526c92]">
-              密钥只包含在分享链接的 # 片段中，不会发送给取件码服务；关闭后可仅凭 8 位取件码接收。
-            </span>
-          </span>
-        </label>
-      )}
-
       {sender.mode === "turbo" && !sender.pickupCode && (
         <p className="rounded-xl bg-[#fff5e8] px-4 py-3 text-sm text-[#9a4a09]">
           极速模式会同时使用五条线路，速度优先，也会消耗更多网络流量。
@@ -380,9 +361,7 @@ function DownloadView({ receiver, guest }: { receiver: ReturnType<typeof useFile
           </div>
           <div className="inline-flex w-fit items-center gap-2 rounded-full bg-[#e8f8ef] px-3 py-1.5 text-xs font-extrabold text-[#23734c]">
             <ShieldCheck aria-hidden="true" size={15} />
-            {receiver.encrypted
-              ? "端到端加密 · 完成前校验 SHA-256"
-              : receiver.descriptor.sha256 ? "完成前校验 SHA-256" : "旧协议：仅校验文件大小"}
+            {receiver.descriptor.sha256 ? "完成前校验 SHA-256" : "旧协议：仅校验文件大小"}
           </div>
         </div>
       )}

@@ -1,5 +1,4 @@
 import { generateCloudflareTurnIceServers } from "../../turn/services/cloudflareTurn";
-import { importTransferEncryptionKey } from "../crypto/fileEncryption";
 import {
   decodeTransferDescriptor,
   decodeTransferOffer,
@@ -64,14 +63,12 @@ export async function runMultipathReceiver({
   target,
   signal,
   preparedPickup,
-  encryptionKey,
   callbacks = {},
 }: {
   code: string;
   target: ReceiveTarget;
   signal: AbortSignal;
   preparedPickup?: PickupPayload;
-  encryptionKey?: CryptoKey | null;
   callbacks?: ReceiverCallbacks;
 }) {
   const routeStates: RouteStates = {};
@@ -98,7 +95,6 @@ export async function runMultipathReceiver({
   if (pickup.variant !== "multipath") throw new Error("这个取件码使用了已停用的技术页面，请让发送方重新生成。");
 
   const offer = await decodeTransferOffer(pickup.offer);
-  if (offer.encryption && !encryptionKey) throw new Error("这个文件需要通过包含端到端密钥的分享链接接收。");
   assertTargetCapacity(target, offer.file.size);
   callbacks.onFile?.(offer.file, offer.mode);
   callbacks.onStatus?.("正在并行连接五条传输线路...");
@@ -110,7 +106,7 @@ export async function runMultipathReceiver({
   const r2Controller = linkedAbortController(signal);
   const cancellationController = linkedAbortController(signal);
   let selectionController: AbortController | null = null;
-  const receiver = new MultipathChannelReceiver(offer, target, channelController.signal, callbacks.onProgress, encryptionKey);
+  const receiver = new MultipathChannelReceiver(offer, target, channelController.signal, callbacks.onProgress);
   // Prevent a later cancellation from becoming an unhandled rejection while R2 is selected.
   void receiver.completion.catch(() => undefined);
   const detach: Array<() => void> = [];
@@ -247,9 +243,9 @@ export async function runMultipathReceiver({
       setRoute("r2", "transferring");
       void streamR2FileWhenReady({
         route: r2Offer,
-        expectedSize: r2Offer.contentSize ?? offer.file.size,
-        expectedSha256: offer.encryption ? null : offer.file.sha256,
-        chunkSize: offer.file.chunkSize + (offer.encryption?.tagBytes ?? 0),
+        expectedSize: offer.file.size,
+        expectedSha256: offer.file.sha256,
+        chunkSize: offer.file.chunkSize,
         signal: r2Controller.signal,
         onChunk: (sequence, chunk) => receiver.acceptExternalChunk("r2", sequence, chunk),
       }).then(async ({ totalChunks }) => {
@@ -334,20 +330,16 @@ export async function inspectPickupFile(
   signal?: AbortSignal,
   onPending?: () => void,
   allowGuest = false,
-  encryptionSecret = "",
 ) {
   const pickup = await waitForPickupOffer(code, signal, { onPending, allowGuest });
   if (Date.now() >= pickup.expiresAt) throw new Error("这个取件码已经过期，请让发送方重新生成。");
   if (pickup.variant === "r2") {
     const descriptor = await decodeTransferDescriptor(pickup.offer);
-    return { pickup, file: descriptor.file, mode: "legacy" as const, encryptionKey: null };
+    return { pickup, file: descriptor.file, mode: "legacy" as const };
   }
   if (pickup.variant !== "multipath") throw new Error("这个取件码使用了已停用的传输协议。");
   const offer = await decodeTransferOffer(pickup.offer);
-  const encryptionKey = offer.encryption
-    ? await importTransferEncryptionKey(encryptionSecret, offer.encryption)
-    : null;
-  return { pickup, file: offer.file, mode: offer.mode, encryptionKey };
+  return { pickup, file: offer.file, mode: offer.mode };
 }
 
 export async function chooseInitialReceiveTarget(file?: Pick<TransferFileManifest, "name" | "size">) {

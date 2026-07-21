@@ -1,6 +1,4 @@
 import type { R2TemporaryCredentials } from "../../r2/services/r2Credentials";
-import type { TransferEncryptionContext } from "../crypto/fileEncryption";
-import { encryptTransferChunk } from "../crypto/fileEncryption";
 import { throwIfAborted } from "../hooks/useTransferLifecycle";
 
 const resumePrefix = "file-transfer:r2-multipart:";
@@ -16,8 +14,8 @@ export type MultipartResumeState = {
   updatedAt: number;
 };
 
-export async function loadMultipartResume(file: File, encryptionKeyId = "plain") {
-  const fingerprint = await fileFingerprint(file, encryptionKeyId);
+export async function loadMultipartResume(file: File) {
+  const fingerprint = await fileFingerprint(file);
   const storage = localResumeStorage();
   if (!storage) return { fingerprint, state: null };
   try {
@@ -34,7 +32,6 @@ export async function uploadMultipartR2({
   credentials,
   file,
   chunkSize,
-  encryption,
   resume,
   signal,
   onProgress,
@@ -43,7 +40,6 @@ export async function uploadMultipartR2({
   credentials: R2TemporaryCredentials;
   file: File;
   chunkSize: number;
-  encryption?: TransferEncryptionContext | null;
   resume: { fingerprint: string; state: MultipartResumeState | null };
   signal: AbortSignal;
   onProgress?: (bytes: number, total: number) => void;
@@ -80,9 +76,7 @@ export async function uploadMultipartR2({
         onProgress?.(end, file.size);
         continue;
       }
-      const body = encryption
-        ? await encryptedPart(file, start, end, chunkSize, encryption, signal)
-        : file.slice(start, end, file.type || "application/octet-stream");
+      const body = file.slice(start, end, file.type || "application/octet-stream");
       const etag = await uploadPart(credentials, state.uploadId, partNumber, body, signal);
       completed.set(partNumber, etag);
       state.parts = [...completed.entries()]
@@ -102,7 +96,6 @@ export async function uploadMultipartR2({
         credentials,
         file,
         chunkSize,
-        encryption,
         resume: { fingerprint: resume.fingerprint, state: null },
         signal,
         onProgress,
@@ -184,33 +177,14 @@ async function completeMultipartUpload(
   }
 }
 
-async function encryptedPart(
-  file: File,
-  start: number,
-  end: number,
-  chunkSize: number,
-  encryption: TransferEncryptionContext,
-  signal: AbortSignal,
-) {
-  const chunks: BlobPart[] = [];
-  for (let offset = start; offset < end; offset += chunkSize) {
-    throwIfAborted(signal);
-    const sequence = Math.floor(offset / chunkSize);
-    const plaintext = new Uint8Array(await file.slice(offset, Math.min(offset + chunkSize, end)).arrayBuffer());
-    const encrypted = await encryptTransferChunk(encryption.key, encryption.metadata, sequence, plaintext);
-    chunks.push(encrypted.buffer.slice(encrypted.byteOffset, encrypted.byteOffset + encrypted.byteLength) as ArrayBuffer);
-  }
-  return new Blob(chunks, { type: "application/octet-stream" });
-}
-
 function alignedPartSize(fileSize: number, chunkSize: number) {
   const required = Math.max(minimumPartBytes, Math.ceil(fileSize / maxParts));
   return Math.ceil(required / chunkSize) * chunkSize;
 }
 
-async function fileFingerprint(file: File, encryptionKeyId: string) {
+async function fileFingerprint(file: File) {
   const signing = await import("../../r2/services/r2Signing");
-  return signing.sha256Hex(`${file.name}\0${file.size}\0${file.lastModified}\0${encryptionKeyId}`);
+  return signing.sha256Hex(`${file.name}\0${file.size}\0${file.lastModified}`);
 }
 
 function saveState(state: MultipartResumeState) {

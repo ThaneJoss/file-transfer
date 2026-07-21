@@ -3,14 +3,9 @@ import { generateCloudflareTurnIceServers } from "../../turn/services/cloudflare
 import { throwIfAborted } from "../hooks/useTransferLifecycle";
 import {
   decodeTransferAnswer,
-  encryptedFileTransferProtocolKind,
   encodeTransferOffer,
   fileTransferProtocolKind,
 } from "../protocol/fileProtocol";
-import {
-  persistTransferEncryptionResume,
-  type TransferEncryptionContext,
-} from "../crypto/fileEncryption";
 import type {
   MultipathTransferOffer,
   TransferMethod,
@@ -68,13 +63,11 @@ export async function runMultipathSender({
   file,
   mode,
   signal,
-  encryption,
   callbacks = {},
 }: {
   file: File;
   mode: TransferMode;
   signal: AbortSignal;
-  encryption?: TransferEncryptionContext | null;
   callbacks?: SenderCallbacks;
 }) {
   const routeStates: RouteStates = {};
@@ -99,10 +92,7 @@ export async function runMultipathSender({
     for (const route of ["direct", "stun", "turn", "sfu", "r2"] as const) setRoute(route, "preparing");
     callbacks.onStatus?.("正在并行校验文件并准备五条传输线路...");
 
-    const hashPromise = encryption?.fileSha256
-      ? Promise.resolve(encryption.fileSha256)
-      : sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
-    if (encryption?.fileSha256) callbacks.onHashProgress?.(file.size, file.size);
+    const hashPromise = sha256Blob(file, { signal, onProgress: callbacks.onHashProgress });
 
     const prepareWebRtc = (route: "direct" | "stun" | "turn") => withRouteDeadline(
       signal,
@@ -140,7 +130,7 @@ export async function runMultipathSender({
       signal,
       routePreparationTimeoutMs,
       "R2 准备",
-      (routeSignal) => prepareR2Route({ file, signal: routeSignal, encryption }),
+      (routeSignal) => prepareR2Route({ file, signal: routeSignal }),
     ).then((session) => {
       r2Session = session;
       return session;
@@ -152,7 +142,6 @@ export async function runMultipathSender({
     ]);
     if (!hashResult.ok) throw hashResult.error;
     const sha256 = hashResult.value;
-    if (encryption) persistTransferEncryptionResume(encryption, sha256);
     throwIfAborted(signal);
     const preparationErrors: Error[] = [];
     const preparedWebRtc: Array<{ session: WebRtcSenderSession; offer: WebRtcSignal }> = [];
@@ -187,7 +176,7 @@ export async function runMultipathSender({
     if (routeOffers.length === 0) throw new AggregateError(preparationErrors, "五条传输线路都无法准备。");
 
     const offer: MultipathTransferOffer = {
-      kind: encryption ? encryptedFileTransferProtocolKind : fileTransferProtocolKind,
+      kind: fileTransferProtocolKind,
       transferId,
       mode,
       createdAt: Date.now(),
@@ -202,7 +191,6 @@ export async function runMultipathSender({
         totalChunks,
       },
       routes: routeOffers,
-      ...(encryption ? { encryption: encryption.metadata } : {}),
     };
 
     callbacks.onStatus?.(`线路准备完成，${routeOffers.length} 条线路可用，正在发布线路信息...`);
@@ -274,7 +262,7 @@ export async function runMultipathSender({
       const realtimeTasks = usableRealtimeRoutes.map((route, index) =>
         sendFileOnChannel({
           route, offer, file, signal: childControllers[index].signal,
-          onProgress: callbacks.onProgress, encryptionKey: encryption?.key,
+          onProgress: callbacks.onProgress,
         })
           .finally(() => route.dispose()),
       );
@@ -353,7 +341,7 @@ export async function runMultipathSender({
           if (!route) continue;
           setRoute(method, "transferring");
           const confirmation = await sendFileOnChannel({
-            route, offer, file, signal, onProgress: callbacks.onProgress, encryptionKey: encryption?.key,
+            route, offer, file, signal, onProgress: callbacks.onProgress,
           });
           winner = { route: method, bytes: confirmation.bytes, sha256: confirmation.sha256 };
           setRoute(method, "complete");
