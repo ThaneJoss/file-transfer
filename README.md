@@ -25,6 +25,8 @@
 
 ## 代码结构
 
+- `worker/`：从原 `file-transfer-api` 仓库迁入的 Cloudflare Worker 源码，包含
+  D1 migration、Durable Object 和测试；根目录 `wrangler.jsonc` 是部署配置。
 - `src/features/transfer/protocol/fileProtocol.ts`：v2/v3 协议和严格运行时校验。
 - `src/features/transfer/workers/hash.worker.ts`：大文件后台增量 SHA-256。
 - `src/features/transfer/transports/webrtc`：Direct / STUN / TURN 信令、candidate 隔离和 DataChannel 生命周期。
@@ -40,7 +42,7 @@
 
 ## 本地开发
 
-要求 Node.js 24+ 和 pnpm 11.6。
+要求 Node.js 24+ 和 pnpm 11.15.1。
 
 ```bash
 pnpm install --frozen-lockfile
@@ -50,6 +52,14 @@ pnpm dev
 
 `VITE_API_BASE_URL` 可选；不设置时使用 `https://api.file.thanejoss.com`。API 负责 Passkey 会话、访客取件令牌、短期 TURN / R2 凭据、SFU 代理、取件协调和脱敏诊断；浏览器不会持有长期服务密钥。
 
+API Worker 与前端共用根目录依赖和锁文件。首次开发时另开终端执行：
+
+```bash
+cp .dev.vars.example .dev.vars
+pnpm db:migrations:apply:local
+pnpm dev:worker
+```
+
 ## 验证
 
 ```bash
@@ -57,16 +67,62 @@ pnpm typecheck
 pnpm test:unit
 pnpm test:e2e
 pnpm build
+pnpm check:worker
+pnpm test:worker
+pnpm worker:types:check
+pnpm worker:dry-run
 ```
 
 `pnpm check` 串行执行全部检查。单元测试覆盖 Worker 哈希、multipart 恢复、长轮询客户端、路由超时、极速去重、完整性和取消。Playwright 除常规 API / R2 mock 场景外，还会在两个真实 Chromium 页面之间使用原生 `RTCPeerConnection` 完成一次传输，用来捕获真实浏览器对象序列化和 DataChannel 编排问题。
 
 生产构建会生成 Vite manifest 并执行 bundle budget：初始静态 JS 不超过 115 KiB gzip、最大单块不超过 95 KiB gzip、全部 JS 不超过 175 KiB gzip。首页、登录页、账户页、R2 签名器和哈希 Worker 分块加载；阈值可用对应的 `BUNDLE_MAX_*_KIB` 环境变量临时覆盖。
 
+## 独立部署
+
+前端和 API 位于同一个 GitHub 仓库并共用默认仓库根目录，但使用不同的构建与部署
+命令。`pnpm build` 只构建 Vite 前端；根目录 `wrangler.jsonc` 只指向
+`worker/src/index.ts`，且不配置 `assets`，因此 Worker 部署不会上传 `dist/`。
+
+### Vercel 前端
+
+Vercel 保持默认仓库根目录，不需要设置 Root Directory 或 Ignored Build Step：
+
+```txt
+Install Command: pnpm install --frozen-lockfile
+Build Command: pnpm build
+Output Directory: dist
+```
+
+纯 Worker 提交仍可能触发一次 Vercel 构建，但该构建只执行前端命令，不会部署
+Cloudflare Worker。
+
+### Cloudflare API Worker
+
+把现有 `file-transfer-api` Worker 的 Git 仓库连接改为
+`ThaneJoss/file-transfer`，并使用：
+
+```txt
+Production branch: main
+Build command: pnpm build:worker
+Deploy command: pnpm deploy:worker
+Non-production branch deploy command: pnpm preview:worker
+Build variable: PNPM_VERSION=11.15.1
+```
+
+Root Directory 保持 Cloudflare 默认值，不需要手动填写。根目录 `wrangler.jsonc`
+保留原 Worker 名称、自定义域名、D1 数据库 ID、Durable Object migration 和全部
+Secret 名称；`pnpm deploy:worker` 会先应用远程 D1 migration，再发布 Worker。
+配置中刻意没有 `assets`，因此不会部署前端。应直接修改现有 `file-transfer-api` Worker
+项目的 Git 连接，这样 Runtime Secrets、D1 与 Durable Object 都继续留在原项目中；不要
+另建一个同名替代 Worker。
+
+原 `file-transfer-api` GitHub 仓库在新仓库成功生产部署前应保持不变；确认切换完成后再
+手动归档，避免两个仓库同时自动部署同一个 Worker。
+
 ## 部署注意事项
 
-- 先部署 API 与 D1 migration `0006_guest_claim_rate_limit.sql`，再部署前端。
-- R2 CORS 必须允许站点 Origin、`GET` / `PUT` / `POST` / `DELETE`、签名请求头，并暴露 `ETag`、`Content-Length` 和 `Content-Type`；仓库中的 `config/r2-cors.json` 是对应配置。
+- 涉及前后端协议的联合改动，先部署 API 与所需 D1 migration，再部署前端。
+- R2 CORS 必须允许站点 Origin、`GET` / `PUT` / `POST` / `DELETE`、签名请求头，并暴露 `ETag`、`Content-Length` 和 `Content-Type`；仓库中的 `worker/config/r2-cors.json` 是对应配置。
 - 前端为所有页面设置 CSP、HSTS、COOP、CORP、Permissions Policy、Referrer Policy、`nosniff` 和防嵌入响应头；若更换 API 或 R2 域名，需要同步更新 `vercel.json` 的 `connect-src`。
 - `/assets/*` 使用内容哈希和长期不可变缓存，其他路径回退到 `index.html`。模块脚本保留 `data-cfasync="false"`，避免 Cloudflare Rocket Loader 改写启动脚本。
 - 临时对象和未完成 multipart 的最终清理由对象存储生命周期规则负责；前端恢复记录只保留 24 小时。

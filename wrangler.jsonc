@@ -1,0 +1,57 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "file-transfer-api",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-06-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "api.file.thanejoss.com",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "BETTER_AUTH_URL": "https://api.file.thanejoss.com",
+    "APP_ORIGIN": "https://file.thanejoss.com"
+  },
+  "secrets": {
+    "required": [
+      "BETTER_AUTH_SECRET",
+      "TURN_KEY_ID",
+      "TURN_KEY_API_TOKEN",
+      "R2_ACCOUNT_ID",
+      "R2_BUCKET",
+      "R2_PARENT_API_TOKEN",
+      "R2_PARENT_ACCESS_KEY_ID",
+      "SFU_APP_ID",
+      "SFU_APP_TOKEN"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "file-transfer-api-db",
+      "database_id": "82649145-9ce8-4c7a-9457-4ba0db3a97cf",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PICKUP_SESSIONS",
+        "class_name": "PickupSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PickupSession"]
+    }
+  ]
+}
