@@ -69,6 +69,7 @@ pnpm test:e2e
 pnpm build
 pnpm check:worker
 pnpm test:worker
+WORKERS_CI=1 pnpm build
 pnpm worker:types:check
 pnpm worker:dry-run
 ```
@@ -79,8 +80,9 @@ pnpm worker:dry-run
 
 ## 独立部署
 
-前端和 API 位于同一个 GitHub 仓库并共用默认仓库根目录，但使用不同的构建与部署
-命令。`pnpm build` 只构建 Vite 前端；根目录 `wrangler.jsonc` 只指向
+前端和 API 位于同一个 GitHub 仓库并共用默认仓库根目录。Vercel 和 Cloudflare 都执行
+`pnpm build`：Cloudflare Workers Builds 会自动注入 `WORKERS_CI=1`，构建脚本据此只检查
+Worker；其他环境默认构建 Vite 前端。根目录 `wrangler.jsonc` 只指向
 `worker/src/index.ts`，且不配置 `assets`，因此 Worker 部署不会上传 `dist/`。
 
 ### Vercel 前端
@@ -103,16 +105,17 @@ Cloudflare Worker。
 
 ```txt
 Production branch: main
-Build command: pnpm build:worker
-Deploy command: pnpm deploy:worker
-Non-production branch deploy command: pnpm preview:worker
+Build command: pnpm run build
+Deploy command: npx wrangler deploy
+Non-production branch deploy command: npx wrangler versions upload
 Build variable: PNPM_VERSION=11.15.1
 ```
 
 Root Directory 保持 Cloudflare 默认值，不需要手动填写。根目录 `wrangler.jsonc`
 保留原 Worker 名称、自定义域名、D1 数据库 ID、Durable Object migration 和全部
-Secret 名称；`pnpm deploy:worker` 会先应用远程 D1 migration，再发布 Worker。
-配置中刻意没有 `assets`，因此不会部署前端。应直接修改现有 `file-transfer-api` Worker
+Secret 名称。默认 `npx wrangler deploy` 不会自动执行 D1 migration；包含新 migration
+的改动应在生产发布前先运行 `pnpm db:migrations:apply:remote`。配置中刻意没有
+`assets`，因此不会部署前端。应直接修改现有 `file-transfer-api` Worker
 项目的 Git 连接，这样 Runtime Secrets、D1 与 Durable Object 都继续留在原项目中；不要
 另建一个同名替代 Worker。
 
