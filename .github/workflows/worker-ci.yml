@@ -1,0 +1,65 @@
+name: Worker CI
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - ".dev.vars.example"
+      - "drizzle.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "wrangler.jsonc"
+      - ".github/workflows/worker-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".dev.vars.example"
+      - "drizzle.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "wrangler.jsonc"
+      - ".github/workflows/worker-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Typecheck, test, and dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm check:worker
+
+      - name: Worker integration tests
+        run: pnpm test:worker
+
+      - name: Check generated binding types
+        run: pnpm worker:types:check
+
+      - name: Validate Worker bundle
+        run: pnpm worker:dry-run --outdir /tmp/file-transfer-api-dry-run
