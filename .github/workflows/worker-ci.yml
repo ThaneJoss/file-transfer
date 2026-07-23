@@ -52,8 +52,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm check:worker
+      - name: Cloudflare build route
+        run: pnpm build
+        env:
+          WORKERS_CI: "1"
 
       - name: Worker integration tests
         run: pnpm test:worker

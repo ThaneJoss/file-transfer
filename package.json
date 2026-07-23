@@ -7,8 +7,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:worker": "wrangler dev",
-    "build": "tsc -b && vite build && pnpm check:bundle",
-    "build:worker": "tsc --noEmit -p worker/tsconfig.json",
+    "build": "node scripts/build-target.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "preview:worker": "wrangler versions upload",
     "typecheck": "tsc -b && tsc --noEmit -p tsconfig.test.json",

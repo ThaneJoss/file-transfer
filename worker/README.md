@@ -23,9 +23,9 @@ Durable Objects + Worker Secrets。鉴权只启用 Passkey，不提供 email/pas
 ```txt
 Repository: ThaneJoss/file-transfer
 Production branch: main
-Build command: pnpm build:worker
-Deploy command: pnpm deploy:worker
-Non-production branch deploy command: pnpm preview:worker
+Build command: pnpm run build
+Deploy command: npx wrangler deploy
+Non-production branch deploy command: npx wrangler versions upload
 ```
 
 Build Variables:
@@ -35,7 +35,9 @@ PNPM_VERSION=11.15.1
 ```
 
 Root Directory 保持默认仓库根目录，不需要手动填写。根目录 `wrangler.jsonc` 没有
-`assets` 配置，因此 Worker 部署只发布 API，不会接管 Vercel 前端。
+`assets` 配置，因此 Worker 部署只发布 API，不会接管 Vercel 前端。Cloudflare
+Workers Builds 自动注入 `WORKERS_CI=1`，因此同一个 `pnpm build` 会选择 Worker
+检查；Vercel 和本地默认选择前端构建。
 
 ## 后端边界
 
@@ -321,6 +323,7 @@ S3 签名实现必须同时发送 `sessionToken`。TURN 与 R2 的 `fileSizeByte
 ## 代码验证
 
 ```sh
+WORKERS_CI=1 pnpm build
 pnpm check:worker
 pnpm test:worker
 pnpm worker:types:check
