@@ -4,12 +4,28 @@
 
 | 能力 | 当前选择 | 结论与边界 | 验证 |
 | --- | --- | --- | --- |
-| 文件协议 | 版本化 `file-transfer-v2` + 手写运行时守卫 | 外部 JSON 边界只有一个，暂不引入 Zod；协议限制体积、HTTPS 路由、文件清单和 SHA-256 格式 | 协议往返、旧 R2 兼容、非法路由单测 |
+| 文件协议 | 版本化 `file-transfer-v2` / `file-transfer-v3` + 手写运行时守卫 | 外部 JSON 边界只有一个，暂不引入 Zod；协议限制体积、HTTPS 路由、文件清单和 SHA-256 格式 | 协议往返、旧 R2 兼容、非法路由单测 |
 | 增量哈希 | `@noble/hashes` | Web Crypto 没有通用的增量 digest 接口；小型增量实现可避免整文件进内存 | 标准 SHA-256、分块进度和取消单测 |
 | 上传 | 原生 `XMLHttpRequest` + 已签名请求 | 需要可靠上传进度，同时直接发送 `File`；没有引入完整 AWS SDK | 签名确定性单测、上传协议 e2e |
 | 下载 | 原生 `fetch`、ReadableStream、File System Access API | 支持流式校验与直接落盘；不支持文件句柄的浏览器使用 128 MiB 内存上限 | 完整、截断、超长、篡改和取消单测/e2e |
 | 状态与生命周期 | 三个小型 React hooks + `AbortController` | 状态局限在一个产品流，引入 XState 的体积与迁移成本不划算 | 生命周期竞态单测、取消 e2e |
 | 路由 | React Router | 只保留 `/`、`/login`、`/account`；旧技术路径统一回首页 | 布局与导航 e2e |
 | 浏览器回归 | Playwright | 覆盖桌面、平板、移动布局以及上传/下载行为；CI 使用 runner 自带 Chrome | 三组并行 CI e2e |
+| 无障碍回归 | `@axe-core/playwright` | 只进入测试工具链，不增加生产 bundle；覆盖访客、登录、账户与 390 / 768 / 1440 px 布局 | 6 个 axe 场景 |
 
 上传服务和协议下载路由均为动态导入：初始页面不加载签名与下载实现。AWS SDK v3、状态机库和额外 schema 库目前都不会带来与 bundle 成本相称的收益，因此未引入。
+
+## 2026-07-27 安全依赖刷新
+
+- Better Auth、Passkey 与 Drizzle adapter 锁步升级到 `1.6.25`，修复旧版本认证安全公告。
+- React 19、Vite 8、Tailwind CSS 4、Playwright、Wrangler 与 Workers 类型均更新到当前
+  主版本内的最新可用小版本。
+- React Router 从 `react-router-dom@7.18.1` 迁移到 `react-router@8.3.0`，所有声明式
+  路由、链接和 hooks 改从新的统一包导入；项目继续使用纯客户端 `BrowserRouter` SPA，
+  不引入 Framework 或 RSC 模式。
+- TypeScript 7、`@types/node` 26 和 `@testing-library/jest-dom` 7 属于大版本迁移，
+  不与本轮界面重构混装。
+- React Router RSC Action 安全告警已由 v8 迁移消除。`pnpm audit
+  --registry=https://registry.npmjs.org` 仍报告 Drizzle CLI 的旧 esbuild 链；旧
+  esbuild 只存在于本地 schema CLI 链且暂无干净的上游升级路径，因此不使用强制
+  override 改变依赖解析。

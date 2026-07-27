@@ -128,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     session: invalidated ? null : data,
     isPending,
-    sessionError: invalidated ? "登录已过期，请重新登录。" : error?.message ?? "",
+    sessionError: invalidated ? "登录已过期，请重新登录。" : formatSessionError(error?.message),
     usage,
     refreshSession,
     refreshUsage,
@@ -205,4 +205,12 @@ function normalizeQuantity(value: number) {
 function normalizeNullableQuantity(value: number | null | undefined) {
   if (value == null) return null;
   return normalizeQuantity(value);
+}
+
+function formatSessionError(message: string | undefined) {
+  if (!message) return "";
+  if (/failed to fetch|network\s*error|load failed/i.test(message)) {
+    return "暂时无法确认登录状态，请检查网络后重试。";
+  }
+  return message;
 }

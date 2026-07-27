@@ -1,8 +1,9 @@
-import { Cloud, LogIn, LogOut } from "lucide-react";
+import { Activity, LogIn, LogOut, UserRound } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router";
 
+import { ProductBrand } from "../component/ProductBrand";
 import { formatBytes } from "../lib/files/format";
 import { useAuth } from "../lib/auth/AuthProvider";
 import type { UsageSnapshot } from "../lib/auth/AuthProvider";
@@ -20,56 +21,61 @@ export function AppShell({
       className="app-shell mx-auto flex h-dvh min-w-0 flex-col overflow-hidden"
       data-testid="app-shell"
     >
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header
-        className="app-header mb-[clamp(12px,1.5vw,20px)] grid min-w-0 shrink-0 grid-cols-[minmax(210px,1fr)_minmax(0,auto)] items-start gap-4 max-[760px]:grid-cols-1 max-[760px]:justify-items-center"
+        className="app-header grid min-w-0 shrink-0 grid-cols-[minmax(190px,1fr)_auto_minmax(190px,1fr)] items-center gap-4"
         data-testid="app-header"
       >
-        <Link
-          className="inline-flex w-fit items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
-          to="/"
-          aria-label="文件中转站首页"
-          data-testid="app-brand"
-        >
-          <span className="grid size-11 place-items-center rounded-lg bg-[#1677ff] text-white">
-            <Cloud aria-hidden="true" size={26} />
-          </span>
-          <strong>文件中转站</strong>
-        </Link>
+        <ProductBrand testId="app-brand" />
 
-        <div className="flex min-w-0 justify-end justify-self-end max-[760px]:justify-self-center" data-testid="account-area">
+        <div className="network-status hidden items-center gap-2.5 lg:flex" aria-label="传输网络已就绪">
+          <span className="network-status__pulse" />
+          <Activity aria-hidden="true" size={14} />
+          <span>多线路网络已就绪</span>
+        </div>
+
+        <div className="flex min-w-0 justify-end" data-testid="account-area">
           {session ? (
-            <div className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-3 py-2 text-sm">
+            <div className="account-cluster">
               <Link
-                className="grid min-w-0 flex-1 grid-cols-[minmax(86px,auto)_minmax(110px,150px)] items-center gap-3 rounded-xl px-2 py-1 hover:bg-[#eaf2ff] max-[520px]:grid-cols-1 max-[520px]:gap-1.5"
+                className="account-summary"
                 to="/account"
                 aria-label="用户页面"
               >
-                <div className="min-w-0 text-right max-[520px]:text-center">
-                  <div className="truncate font-bold text-[#071b3a]">{session.user.name || session.user.email}</div>
-                  <div className="text-[11px] font-semibold text-[#6b7f9f]">本月用量</div>
-                </div>
-                <HeaderUsageSummary usage={usage} />
+                <span className="account-avatar" aria-hidden="true">
+                  <UserRound size={17} />
+                </span>
+                <span className="hidden min-w-0 sm:block">
+                  <span className="block max-w-32 truncate text-xs font-black text-ink">
+                    {session.user.name || session.user.email}
+                  </span>
+                  <HeaderUsageSummary usage={usage} />
+                </span>
               </Link>
               <button
-                className="mt-0.5 rounded-lg p-2 text-[#526c92] hover:bg-[#eaf2ff] hover:text-[#1476ff]"
+                className="account-action"
                 onClick={() => void signOut().catch((error) => setAccountError(error instanceof Error ? error.message : "退出登录失败。"))}
                 aria-label="退出登录"
                 title={accountError || "退出登录"}
               >
-                <LogOut aria-hidden="true" size={18} />
+                <LogOut aria-hidden="true" size={17} />
               </button>
               {accountError && <span className="sr-only" role="alert">{accountError}</span>}
             </div>
           ) : (
-            <Link className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-3 text-sm font-bold text-[#1476ff]" to="/login">
-              <LogIn aria-hidden="true" size={18} />
-              登录
+            <Link className="header-login" to="/login">
+              <LogIn aria-hidden="true" size={17} />
+              <span>登录</span>
             </Link>
           )}
         </div>
       </header>
 
-      <section className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto" data-testid="page-slot">
+      <section
+        className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto"
+        data-testid="page-slot"
+        id="main-content"
+      >
         {children ?? <Outlet />}
       </section>
     </main>
@@ -84,11 +90,23 @@ function HeaderUsageSummary({ usage }: { usage: UsageSnapshot }) {
     : `${formatBytes(usage.totalBytes)} / ${formatBytes(quota)}`;
 
   return (
-    <div className="grid min-w-0 gap-1.5" aria-label="本月文件用量" data-testid="header-usage-summary" title={label}>
-      <span className="truncate text-right text-xs font-extrabold text-[#365a88] max-[520px]:text-center">{label}</span>
-      <span className="h-2 overflow-hidden rounded-full bg-[#dce8f7]">
-        <span className="block h-full rounded-full bg-[#1677ff]" style={{ width: `${percent}%` }} />
+    <span
+      className="mt-1 grid min-w-0 grid-cols-[1fr_42px] items-center gap-2"
+      aria-label="本月文件用量"
+      data-testid="header-usage-summary"
+      title={label}
+    >
+      <span className="truncate font-mono text-[9px] font-bold text-muted">{label}</span>
+      <span
+        className="h-1 overflow-hidden rounded-full bg-white/10"
+        role="progressbar"
+        aria-label="本月文件用量比例"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(percent)}
+      >
+        <span className="block h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
       </span>
-    </div>
+    </span>
   );
 }

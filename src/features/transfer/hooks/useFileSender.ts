@@ -9,7 +9,28 @@ import { isAbortError, useTransferLifecycle } from "./useTransferLifecycle";
 
 export type SenderPhase = "idle" | "ready" | "preparing" | "waiting" | "transferring" | "complete" | "cancelled" | "error";
 
-export function useFileSender() {
+export type FileSenderController = {
+  file: File | null;
+  mode: TransferMode;
+  phase: SenderPhase;
+  status: string;
+  error: string;
+  progress: number;
+  pickupCode: string;
+  pickupExpiresAt: number | null;
+  shareUrl: string;
+  winner: TransferMethod | null;
+  routes: RouteStates;
+  supportId: string;
+  busy: boolean;
+  setFile: (file: File | null) => void;
+  setMode: (mode: TransferMode) => void;
+  start: () => Promise<void>;
+  cancel: () => void;
+  reset: () => void;
+};
+
+export function useFileSender(): FileSenderController {
   const lifecycle = useTransferLifecycle();
   const diagnosticRef = useRef<TransferDiagnosticSession | null>(null);
   const [file, setFileState] = useState<File | null>(null);

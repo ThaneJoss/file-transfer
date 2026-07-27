@@ -8,6 +8,7 @@ export function TextInput({
   type = "text",
   min,
   max,
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -16,18 +17,20 @@ export function TextInput({
   type?: "text" | "email" | "password" | "number";
   min?: number;
   max?: number;
+  autoComplete?: string;
 }) {
   return (
     <label className="grid min-w-0 gap-2">
-      <span className="min-w-0 truncate text-sm font-extrabold text-[#233d64]" title={label}>{label}</span>
+      <span className="min-w-0 truncate text-xs font-black tracking-[0.08em] text-muted uppercase" title={label}>{label}</span>
       <input
-        className="h-11 min-w-0 rounded-lg border border-[#d7e5f6] bg-white px-3 text-[14px] font-semibold text-[#17345f] outline-none placeholder:text-[#91a4c0] focus:border-[#1677ff] focus:ring-2 focus:ring-[#1677ff]/10"
+        className="form-input h-12 min-w-0 px-4 text-[14px] font-semibold"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type={type}
         min={min}
         max={max}
+        autoComplete={autoComplete}
         spellCheck={false}
       />
     </label>
@@ -39,15 +42,17 @@ export function PrimaryButton({
   onClick,
   disabled = false,
   type = "button",
+  className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   type?: "button" | "submit";
+  className?: string;
 }) {
   return (
     <button
-      className="inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 rounded-lg bg-[#1677ff] px-5 text-center text-[15px] font-extrabold text-white [overflow-wrap:anywhere] hover:bg-[#0d63da] disabled:cursor-not-allowed disabled:bg-[#a9bdd8]"
+      className={`button-primary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-5 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -61,14 +66,16 @@ export function SecondaryButton({
   children,
   onClick,
   disabled = false,
+  className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  className?: string;
 }) {
   return (
     <button
-      className="inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 rounded-lg border border-[#d7e5f6] bg-white px-4 text-center text-[15px] font-extrabold text-[#17345f] [overflow-wrap:anywhere] hover:border-[#9ec7ff] disabled:cursor-not-allowed disabled:text-[#98a9c0]"
+      className={`button-secondary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-4 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -88,8 +95,10 @@ export function StatusMessage({
   return (
     <p
       aria-live={tone === "error" ? "assertive" : "polite"}
-      className={`flex h-11 min-w-0 items-center overflow-hidden rounded-xl px-4 text-[14px] ${
-        tone === "error" ? "bg-[#fff0f0] text-[#b4232b]" : "bg-[#edf6ff] text-[#365a88]"
+      className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 text-[13px] font-semibold ${
+        tone === "error"
+          ? "border-danger/25 bg-danger/10 text-danger"
+          : "border-primary/20 bg-primary/10 text-primary"
       }`}
       role={tone === "error" ? "alert" : "status"}
       title={message}

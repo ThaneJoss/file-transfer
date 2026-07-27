@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
 import { AppShell } from "./layout/AppShell";
@@ -27,8 +27,9 @@ export default function App() {
 
 function PageFallback() {
   return (
-    <div className="grid min-h-screen place-items-center bg-[#f5f9ff] px-6" role="status">
-      <p className="text-sm font-bold text-[#526c92]">正在加载页面...</p>
+    <div className="page-fallback" role="status">
+      <span className="page-fallback__pulse" aria-hidden="true" />
+      <p className="text-sm font-bold text-muted">正在加载页面...</p>
     </div>
   );
 }

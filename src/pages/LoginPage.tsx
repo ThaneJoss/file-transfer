@@ -1,33 +1,70 @@
-import { Cloud } from "lucide-react";
-import { Link } from "react-router-dom";
+import { ArrowLeft, Fingerprint, KeyRound, ShieldCheck, Sparkles } from "lucide-react";
+import { Link } from "react-router";
 
+import { ProductBrand } from "../component/ProductBrand";
 import { AuthPage } from "../features/auth/AuthPage";
 
 export default function LoginPage() {
   return (
-    <main
-      className="mx-auto flex min-h-dvh w-full max-w-[1180px] flex-col px-[clamp(18px,4vw,56px)] py-[clamp(18px,3vw,42px)]"
-      data-testid="login-page"
-    >
-      <header className="flex shrink-0 items-center justify-between gap-4">
-        <Link
-          className="inline-flex items-center gap-3 text-[22px] font-extrabold text-[#071b3a] max-[560px]:text-lg"
-          to="/"
-          aria-label="返回文件中转站"
-        >
-          <span className="grid size-11 place-items-center rounded-lg bg-[#1677ff] text-white">
-            <Cloud aria-hidden="true" size={26} />
-          </span>
-          <strong>文件中转站</strong>
-        </Link>
-        <Link className="rounded-lg bg-white px-4 py-3 text-sm font-bold text-[#1476ff]" to="/">
+    <main className="login-page" data-testid="login-page">
+      <div className="login-page__grid" aria-hidden="true" />
+      <header className="login-header">
+        <ProductBrand ariaLabel="返回文件中转站" />
+        <Link className="back-link" to="/">
+          <ArrowLeft aria-hidden="true" size={16} />
           返回首页
         </Link>
       </header>
 
-      <section className="grid min-h-0 flex-1 place-items-center py-8">
+      <section className="login-layout">
+        <aside className="auth-story">
+          <div className="eyebrow">
+            <span className="eyebrow__signal" aria-hidden="true" />
+            Passwordless identity
+          </div>
+          <h1 className="mt-5 max-w-lg text-[clamp(36px,5vw,64px)] font-black leading-[0.98] tracking-[-0.06em] text-ink">
+            身份验证，
+            <span className="text-gradient block">无需记住密码</span>
+          </h1>
+          <p className="mt-5 max-w-md text-sm leading-7 text-muted">
+            Passkey 使用设备生物识别或安全密钥验证身份。凭证不会离开你的设备，登录更快，也更不容易被钓鱼。
+          </p>
+
+          <div className="auth-story__features">
+            <StoryFeature icon={Fingerprint} label="设备原生验证" />
+            <StoryFeature icon={ShieldCheck} label="抗钓鱼凭证" />
+            <StoryFeature icon={Sparkles} label="一触即达" />
+          </div>
+
+          <div className="auth-orb" aria-hidden="true">
+            <span className="auth-orb__ring auth-orb__ring--one" />
+            <span className="auth-orb__ring auth-orb__ring--two" />
+            <span className="auth-orb__core">
+              <KeyRound size={30} />
+            </span>
+            <i className="auth-orb__node auth-orb__node--one" />
+            <i className="auth-orb__node auth-orb__node--two" />
+            <i className="auth-orb__node auth-orb__node--three" />
+          </div>
+        </aside>
+
         <AuthPage />
       </section>
     </main>
+  );
+}
+
+function StoryFeature({
+  icon: Icon,
+  label,
+}: {
+  icon: typeof Fingerprint;
+  label: string;
+}) {
+  return (
+    <span>
+      <Icon aria-hidden="true" size={15} />
+      {label}
+    </span>
   );
 }

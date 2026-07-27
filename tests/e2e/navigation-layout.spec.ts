@@ -74,7 +74,7 @@ test("fits the logged-out homepage on a scaled 1080p Windows display", async ({ 
 
   const homepage = page.getByTestId("unified-transfer-page");
   await expect(page.getByTestId("transfer-login-required")).toBeVisible();
-  await expect(page.getByText("Failed to fetch")).toBeVisible();
+  await expect(page.getByText("暂时无法确认登录状态，请检查网络后重试。")).toBeVisible();
 
   const pageSlotMetrics = await page.getByTestId("page-slot").evaluate((element) => ({
     clientHeight: element.clientHeight,

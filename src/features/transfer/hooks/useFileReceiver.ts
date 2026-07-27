@@ -10,7 +10,35 @@ import { isAbortError, useTransferLifecycle } from "./useTransferLifecycle";
 
 export type ReceiverPhase = "idle" | "connecting" | "receiving" | "complete" | "cancelled" | "error";
 
-export function useFileReceiver({ allowGuest = false, initialCode = "" }: { allowGuest?: boolean; initialCode?: string } = {}) {
+export type FileReceiverController = {
+  code: string;
+  descriptor: TransferFileManifest | null;
+  transferMode: TransferMode | "legacy" | null;
+  phase: ReceiverPhase;
+  status: string;
+  error: string;
+  progress: number;
+  downloadedBytes: number;
+  savedTo: string;
+  winner: TransferMethod | null;
+  routes: RouteStates;
+  supportId: string;
+  busy: boolean;
+  metadataPending: boolean;
+  readyToReceive: boolean;
+  setCode: (code: string) => void;
+  receive: () => Promise<void>;
+  cancel: () => void;
+  reset: () => void;
+};
+
+export function useFileReceiver({
+  allowGuest = false,
+  initialCode = "",
+}: {
+  allowGuest?: boolean;
+  initialCode?: string;
+} = {}): FileReceiverController {
   const lifecycle = useTransferLifecycle();
   const diagnosticRef = useRef<TransferDiagnosticSession | null>(null);
   const [code, setCodeState] = useState(() => initialCode.replace(/\D/g, "").slice(0, 8));
