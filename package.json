@@ -4,6 +4,9 @@
   "private": true,
   "packageManager": "pnpm@11.15.1",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:worker": "wrangler dev",
@@ -31,42 +34,44 @@
     "db:migrations:list:remote": "wrangler d1 migrations list file-transfer-api-db --remote",
     "db:migrations:apply:local": "wrangler d1 migrations apply file-transfer-api-db --local",
     "db:migrations:apply:remote": "wrangler d1 migrations apply file-transfer-api-db --remote",
-    "check": "pnpm typecheck && pnpm test:unit && pnpm test:e2e && pnpm build"
+    "check": "pnpm typecheck && pnpm test:unit && pnpm test:e2e && pnpm build",
+    "check:all": "pnpm check && WORKERS_CI=1 pnpm build && pnpm check:worker && pnpm test:worker && pnpm worker:types:check && pnpm worker:dry-run"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "^1.6.19",
-    "@better-auth/passkey": "1.6.19",
+    "@better-auth/drizzle-adapter": "^1.6.25",
+    "@better-auth/passkey": "1.6.25",
     "@noble/hashes": "2.2.0",
     "aws4fetch": "^1.0.20",
-    "better-auth": "^1.6.19",
+    "better-auth": "^1.6.25",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26",
-    "jose": "^6.2.3",
-    "lucide-react": "^1.18.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.0"
+    "hono": "^4.12.32",
+    "jose": "^6.2.4",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "^8.3.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.7",
-    "@cloudflare/workers-types": "^5.20260723.1",
-    "@playwright/test": "^1.61.0",
-    "@tailwindcss/vite": "^4.3.1",
+    "@axe-core/playwright": "^4.12.1",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
+    "@cloudflare/workers-types": "^5.20260726.1",
+    "@playwright/test": "^1.62.0",
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.9.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.2",
+    "@vitejs/plugin-react": "^6.0.4",
     "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.10",
     "jsdom": "^29.1.1",
-    "msw": "^2.14.6",
-    "tailwindcss": "^4.3.1",
+    "msw": "^2.15.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10",
-    "wrangler": "^4.113.0"
+    "wrangler": "^4.114.0"
   }
 }

@@ -27,6 +27,13 @@
 
 - `worker/`：从原 `file-transfer-api` 仓库迁入的 Cloudflare Worker 源码，包含
   D1 migration、Durable Object 和测试；根目录 `wrangler.jsonc` 是部署配置。
+- `src/styles.css`：Tailwind CSS 4 设计令牌、深色边缘网络视觉系统、响应式规则和
+  `prefers-reduced-motion` 降级策略。
+- `src/component/ProductBrand.tsx`：首页、登录页与账户页复用的品牌标识。
+- `src/features/transfer/FileTransferPage.tsx`：只负责上传/下载方向、登录状态和
+  sender / receiver controller 的页面编排。
+- `src/features/transfer/components/`：Hero、上传面板、下载面板、取件码单据、线路遥测、
+  进度与状态反馈等纯 UI 组件。
 - `src/features/transfer/protocol/fileProtocol.ts`：v2/v3 协议和严格运行时校验。
 - `src/features/transfer/workers/hash.worker.ts`：大文件后台增量 SHA-256。
 - `src/features/transfer/transports/webrtc`：Direct / STUN / TURN 信令、candidate 隔离和 DataChannel 生命周期。
@@ -72,9 +79,18 @@ pnpm test:worker
 WORKERS_CI=1 pnpm build
 pnpm worker:types:check
 pnpm worker:dry-run
+pnpm check:all
 ```
 
-`pnpm check` 串行执行全部检查。单元测试覆盖 Worker 哈希、multipart 恢复、长轮询客户端、路由超时、极速去重、完整性和取消。Playwright 除常规 API / R2 mock 场景外，还会在两个真实 Chromium 页面之间使用原生 `RTCPeerConnection` 完成一次传输，用来捕获真实浏览器对象序列化和 DataChannel 编排问题。
+`pnpm check` 串行执行完整前端检查；`pnpm check:all` 在此基础上继续验证 Worker
+构建、类型、测试与 dry-run。单元测试覆盖 Worker 哈希、multipart 恢复、长轮询客户端、
+路由超时、极速去重、完整性和取消。Playwright 除常规 API / R2 mock 场景外，还会在两个
+真实 Chromium 页面之间使用原生 `RTCPeerConnection` 完成一次传输，用来捕获真实浏览器
+对象序列化和 DataChannel 编排问题。
+
+`tests/e2e/accessibility.spec.ts` 使用 axe 检查访客首页、登录态首页、Passkey 登录页和
+账户页，并在 390 px、768 px 与桌面布局上验证自动可检测的无障碍规则。视觉系统的所有
+动效都在用户启用“减少动态效果”时自动关闭。
 
 生产构建会生成 Vite manifest 并执行 bundle budget：初始静态 JS 不超过 115 KiB gzip、最大单块不超过 95 KiB gzip、全部 JS 不超过 175 KiB gzip。首页、登录页、账户页、R2 签名器和哈希 Worker 分块加载；阈值可用对应的 `BUNDLE_MAX_*_KIB` 环境变量临时覆盖。
 
