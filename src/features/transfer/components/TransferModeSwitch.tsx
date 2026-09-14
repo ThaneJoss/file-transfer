@@ -64,8 +64,8 @@ function ModeButton({
     >
       <Icon aria-hidden="true" size={18} />
       <span className="min-w-0 text-left">
-        <strong className="block truncate text-sm font-black">{label}</strong>
-        <small className="mt-0.5 hidden truncate text-[10px] font-semibold sm:block">{description}</small>
+        <strong className="block truncate text-sm font-semibold">{label}</strong>
+        <small className="mt-0.5 hidden truncate text-xs font-semibold sm:block">{description}</small>
       </span>
     </button>
   );

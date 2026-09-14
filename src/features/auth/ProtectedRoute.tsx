@@ -9,7 +9,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (isPending && !session) {
     return (
-      <div className="grid min-h-64 place-items-center text-sm font-bold text-muted" role="status">
+      <div className="grid min-h-64 place-items-center text-sm font-normal text-muted" role="status">
         正在检查登录状态...
       </div>
     );

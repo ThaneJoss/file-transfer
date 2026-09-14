@@ -45,7 +45,7 @@ export function RouteDiagnostics({
           </div>
         )}
         {supportId && (
-          <p className="mt-3 break-all font-mono text-[10px] leading-5 text-muted">
+          <p className="mt-3 break-all font-mono text-xs leading-5 text-muted">
             SUPPORT ID · {supportId}
           </p>
         )}
@@ -67,7 +67,7 @@ export function ProgressCard({
   return (
     <div className="progress-card" data-testid={testId}>
       <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="flex min-w-0 items-center gap-2 font-bold text-muted">
+        <span className="flex min-w-0 items-center gap-2 font-normal text-muted">
           <LoaderCircle className="animate-spin text-primary" aria-hidden="true" size={14} />
           <span className="truncate">{label}</span>
         </span>

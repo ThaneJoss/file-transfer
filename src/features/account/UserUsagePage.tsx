@@ -96,8 +96,8 @@ export function UserUsagePage() {
             </span>
             <div className="min-w-0">
               <span className="panel-kicker">Usage control center</span>
-              <h1 className="mt-1.5 text-[28px] font-black tracking-[-0.04em] text-ink">账户与用量</h1>
-              <p className="mt-1 truncate text-sm font-bold text-soft">{accountName}</p>
+              <h1 className="mt-1.5 text-[28px] font-semibold text-ink">账户与用量</h1>
+              <p className="mt-1 truncate text-sm font-normal text-soft">{accountName}</p>
             </div>
           </div>
           <div className="flex flex-wrap justify-end gap-2 max-sm:justify-start">
@@ -162,7 +162,7 @@ export function UserUsagePage() {
               <div className="flex min-w-0 items-start justify-between gap-4">
                 <div className="min-w-0">
                   <span className="panel-kicker">{row.id === "files" ? "Bandwidth" : "Coordination"}</span>
-                  <h2 className="mt-2 text-xl font-black tracking-[-0.03em] text-ink">{row.label}</h2>
+                  <h2 className="mt-2 text-xl font-semibold text-ink">{row.label}</h2>
                   <p className="mt-1 max-w-sm text-xs leading-5 text-muted">{row.description}</p>
                 </div>
                 <span className="usage-service-card__icon">
@@ -173,10 +173,10 @@ export function UserUsagePage() {
               </div>
 
               <div className="mt-6">
-                <div className="text-[clamp(28px,4vw,38px)] font-black leading-tight tracking-[-0.045em] text-ink">
+                <div className="text-[clamp(28px,4vw,38px)] font-semibold leading-tight text-ink">
                   {formatQuantity(summary.usage, summary.unit)}
                 </div>
-                <div className="mt-1 font-mono text-[10px] font-bold tracking-[0.08em] text-muted uppercase">
+                <div className="mt-1 text-xs font-normal text-muted uppercase">
                   Quota · {formatQuotaByUnit(summary.quota, summary.unit)}
                 </div>
               </div>
@@ -195,7 +195,7 @@ export function UserUsagePage() {
                     style={{ width: quotaPercent === null ? "0%" : formatPercent(quotaPercent) }}
                   />
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[10px] font-bold text-muted">
+                <div className="mt-2 flex items-center justify-between text-xs font-normal text-muted">
                   <span>本月</span>
                   {quotaPercent === null ? "额度未配置" : `已用 ${formatPercent(quotaPercent)}`}
                 </div>
@@ -223,8 +223,8 @@ function UsageMetric({
         <Icon aria-hidden="true" size={16} />
       </span>
       <div className="min-w-0">
-        <div className="truncate text-[10px] font-black tracking-[0.08em] text-muted uppercase">{label}</div>
-        <div className="mt-1 truncate text-xl font-black tracking-[-0.035em] text-ink" title={value}>{value}</div>
+        <div className="truncate text-xs font-semibold text-muted uppercase">{label}</div>
+        <div className="mt-1 truncate text-xl font-semibold text-ink" title={value}>{value}</div>
       </div>
     </div>
   );

@@ -31,7 +31,7 @@ export function DownloadPanel({
       <header className="transfer-panel__header">
         <div>
           <span className="panel-kicker">01 · Enter pickup code</span>
-          <h2 className="mt-1.5 text-xl font-black tracking-[-0.03em] text-ink sm:text-2xl">下载文件</h2>
+          <h2 className="mt-1.5 text-xl font-semibold text-ink sm:text-2xl">下载文件</h2>
           <p className="mt-1 text-xs leading-5 text-muted sm:text-sm">
             输入取件码，自动完成连接、测速与校验。
           </p>
@@ -76,10 +76,10 @@ export function DownloadPanel({
             <FileCheck2 aria-hidden="true" size={22} />
           </span>
           <div className="min-w-0">
-            <span className="block font-mono text-[9px] font-bold tracking-[0.14em] text-muted uppercase">
+            <span className="block text-xs font-normal text-muted uppercase">
               Incoming file
             </span>
-            <strong className="mt-1 block truncate text-sm font-black text-ink" title={receiver.descriptor.name}>
+            <strong className="mt-1 block truncate text-sm font-semibold text-ink" title={receiver.descriptor.name}>
               {receiver.descriptor.name}
             </strong>
             <span className="mt-1 block text-xs text-muted">{formatBytes(receiver.descriptor.size)}</span>
@@ -102,10 +102,10 @@ export function DownloadPanel({
             <CheckCircle2 aria-hidden="true" size={24} />
           </span>
           <div className="min-w-0">
-            <strong className="text-sm font-black text-ink">文件已安全保存</strong>
+            <strong className="text-sm font-semibold text-ink">文件已安全保存</strong>
             <p className="mt-1 truncate text-xs text-muted">保存位置：{receiver.savedTo || "浏览器下载"}</p>
             {receiver.winner && (
-              <p className="mt-1 font-mono text-[10px] font-bold text-positive">
+              <p className="mt-1 text-xs font-normal text-positive">
                 最快线路：{receiver.winner.toUpperCase()}
               </p>
             )}

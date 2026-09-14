@@ -21,7 +21,7 @@ export function TextInput({
 }) {
   return (
     <label className="grid min-w-0 gap-2">
-      <span className="min-w-0 truncate text-xs font-black tracking-[0.08em] text-muted uppercase" title={label}>{label}</span>
+      <span className="min-w-0 truncate text-xs font-semibold text-muted uppercase" title={label}>{label}</span>
       <input
         className="form-input h-12 min-w-0 px-4 text-[14px] font-semibold"
         value={value}
@@ -52,7 +52,7 @@ export function PrimaryButton({
 }) {
   return (
     <button
-      className={`button-primary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-5 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
+      className={`button-primary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-5 text-center text-[14px] font-semibold [overflow-wrap:anywhere] ${className}`}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -75,7 +75,7 @@ export function SecondaryButton({
 }) {
   return (
     <button
-      className={`button-secondary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-4 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
+      className={`button-secondary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-4 text-center text-[14px] font-semibold [overflow-wrap:anywhere] ${className}`}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -95,15 +95,15 @@ export function StatusMessage({
   return (
     <p
       aria-live={tone === "error" ? "assertive" : "polite"}
-      className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 text-[13px] font-semibold ${
+      className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 py-2 text-[13px] font-normal leading-6 ${
         tone === "error"
           ? "border-danger/25 bg-danger/10 text-danger"
-          : "border-primary/20 bg-primary/10 text-primary"
+          : "border-primary/20 bg-primary/10 text-primary-strong"
       }`}
       role={tone === "error" ? "alert" : "status"}
       title={message}
     >
-      <span className="block min-w-0 truncate">{message}</span>
+      <span className="block min-w-0 break-words">{message}</span>
     </p>
   );
 }

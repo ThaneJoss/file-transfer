@@ -1,6 +1,4 @@
-import { Check, Hash, RadioTower, Route, Zap } from "lucide-react";
-
-const transferRoutes = ["DIRECT", "STUN", "TURN", "SFU", "R2"];
+import { Check, Hash, RadioTower, Zap } from "lucide-react";
 
 export function TransferHero() {
   return (
@@ -8,11 +6,11 @@ export function TransferHero() {
       <div className="transfer-hero__copy">
         <div className="eyebrow">
           <span className="eyebrow__signal" aria-hidden="true" />
-          Multipath transfer engine
+          简单、安全地分享文件
         </div>
         <h1
           aria-label="传文件，只需要一个取件码"
-          className="home-transfer-title mt-4 max-w-xl text-[clamp(30px,4vw,52px)] font-black leading-[1.02] tracking-[-0.055em] text-ink"
+          className="home-transfer-title mt-4 max-w-xl text-[clamp(28px,2.6vw,36px)] font-semibold leading-[1.25] text-ink"
           id="transfer-title"
         >
           <span className="block">传文件，</span>
@@ -21,25 +19,6 @@ export function TransferHero() {
         <p className="home-transfer-subtitle mt-4 max-w-xl text-sm leading-6 text-muted sm:text-[15px]">
           五条线路实时竞速，自动选择更快路径。无需复杂配置，用 8 位取件码完成连接、传输与完整性校验。
         </p>
-      </div>
-
-      <div className="network-orbit" aria-hidden="true">
-        <div className="network-orbit__ring network-orbit__ring--outer" />
-        <div className="network-orbit__ring network-orbit__ring--inner" />
-        <div className="network-orbit__beam" />
-        <div className="network-orbit__core">
-          <Route size={27} />
-          <span>SMART</span>
-        </div>
-        {transferRoutes.map((route, index) => (
-          <span
-            className={`network-orbit__node network-orbit__node--${index + 1}`}
-            key={route}
-          >
-            <i />
-            {route}
-          </span>
-        ))}
       </div>
 
       <div className="transfer-proof-grid" aria-label="传输能力">
@@ -74,8 +53,8 @@ function Proof({
         <Icon aria-hidden="true" size={15} />
       </span>
       <span>
-        <span className="block font-mono text-[9px] font-bold tracking-[0.12em] text-muted uppercase">{label}</span>
-        <strong className="mt-1 block text-xs font-black text-ink">{value}</strong>
+        <span className="block text-xs font-normal text-muted uppercase">{label}</span>
+        <strong className="mt-1 block text-xs font-semibold text-ink">{value}</strong>
       </span>
     </div>
   );

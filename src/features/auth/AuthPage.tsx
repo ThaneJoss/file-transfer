@@ -55,7 +55,7 @@ export function AuthPage() {
             : <UserPlus aria-hidden="true" size={25} />}
         </div>
         <span className="panel-kicker">{mode === "sign-in" ? "Welcome back" : "Create identity"}</span>
-        <h1 className="mt-2 text-[28px] font-black tracking-[-0.04em] text-ink">
+        <h1 className="mt-2 text-[28px] font-semibold text-ink">
           {mode === "sign-in" ? "Passkey 登录" : "Passkey 注册"}
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted">
