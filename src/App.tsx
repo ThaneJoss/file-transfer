@@ -29,7 +29,7 @@ function PageFallback() {
   return (
     <div className="page-fallback" role="status">
       <span className="page-fallback__pulse" aria-hidden="true" />
-      <p className="text-sm font-bold text-muted">正在加载页面...</p>
+      <p className="text-sm font-normal text-muted">正在加载页面...</p>
     </div>
   );
 }

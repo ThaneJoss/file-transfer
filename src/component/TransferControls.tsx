@@ -21,7 +21,7 @@ export function TextInput({
 }) {
   return (
     <label className="grid min-w-0 gap-2">
-      <span className="min-w-0 truncate text-xs font-semibold tracking-[0.08em] text-muted uppercase" title={label}>{label}</span>
+      <span className="min-w-0 truncate text-xs font-semibold text-muted uppercase" title={label}>{label}</span>
       <input
         className="form-input h-12 min-w-0 px-4 text-[14px] font-semibold"
         value={value}

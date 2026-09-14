@@ -1,6 +1,5 @@
 import { Check, Hash, RadioTower, Zap } from "lucide-react";
 
-
 export function TransferHero() {
   return (
     <section className="transfer-hero" aria-labelledby="transfer-title">
@@ -11,7 +10,7 @@ export function TransferHero() {
         </div>
         <h1
           aria-label="传文件，只需要一个取件码"
-          className="home-transfer-title mt-4 max-w-xl text-[clamp(28px,3vw,40px)] font-semibold leading-[1.25] tracking-[-0.055em] text-ink"
+          className="home-transfer-title mt-4 max-w-xl text-[clamp(28px,2.6vw,36px)] font-semibold leading-[1.25] text-ink"
           id="transfer-title"
         >
           <span className="block">传文件，</span>
@@ -54,7 +53,7 @@ function Proof({
         <Icon aria-hidden="true" size={15} />
       </span>
       <span>
-        <span className="block font-mono text-xs font-bold tracking-[0.12em] text-muted uppercase">{label}</span>
+        <span className="block text-xs font-normal text-muted uppercase">{label}</span>
         <strong className="mt-1 block text-xs font-semibold text-ink">{value}</strong>
       </span>
     </div>

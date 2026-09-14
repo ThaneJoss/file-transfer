@@ -31,7 +31,7 @@ export function UploadLoginRequired({ sessionError }: { sessionError: string }) 
       </span>
       <div className="relative">
         <span className="panel-kicker">Sender access</span>
-        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em] text-ink">上传文件需要登录</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-ink">上传文件需要登录</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">
           使用 Passkey 保护上传额度。接收方无需账号，打开分享链接即可安全接收。
         </p>
@@ -45,7 +45,7 @@ export function UploadLoginRequired({ sessionError }: { sessionError: string }) 
         <LogIn aria-hidden="true" size={17} />
         使用 Passkey 登录
       </Link>
-      <p className="relative font-mono text-xs font-bold tracking-[0.14em] text-subtle uppercase">
+      <p className="relative text-xs font-normal text-subtle uppercase">
         Passwordless · WebAuthn
       </p>
     </Panel>
@@ -94,7 +94,7 @@ export function UploadPanel({ sender }: { sender: FileSenderController }) {
       <header className="transfer-panel__header">
         <div>
           <span className="panel-kicker">01 · Prepare transfer</span>
-          <h2 className="mt-1.5 text-xl font-semibold tracking-[-0.03em] text-ink sm:text-2xl">上传文件</h2>
+          <h2 className="mt-1.5 text-xl font-semibold text-ink sm:text-2xl">上传文件</h2>
           <p className="mt-1 text-xs leading-5 text-muted sm:text-sm">
             接收方加入前，不会发送文件正文。
           </p>
@@ -168,7 +168,7 @@ export function UploadPanel({ sender }: { sender: FileSenderController }) {
                 <strong className="block max-w-[min(65vw,420px)] truncate text-base font-semibold text-ink" title={sender.file.name}>
                   {sender.file.name}
                 </strong>
-                <span className="mt-1 block font-mono text-xs font-bold tracking-[0.08em] text-muted">
+                <span className="mt-1 block text-xs font-normal text-muted">
                   {formatBytes(sender.file.size)} · READY
                 </span>
               </div>
@@ -299,13 +299,13 @@ function PickupCodeCard({
             : <Zap aria-hidden="true" size={16} />}
           {sender.phase === "complete" ? "传输已完成" : "等待接收方加入"}
         </span>
-        <span className="font-mono text-xs font-bold tracking-[0.1em] text-muted uppercase">
+        <span className="text-xs font-normal text-muted uppercase">
           One-time pickup
         </span>
       </div>
 
       <div className="pickup-ticket__code">
-        <span className="text-xs font-semibold tracking-[0.16em] text-muted uppercase">8 位取件码</span>
+        <span className="text-xs font-semibold text-muted uppercase">8 位取件码</span>
         <strong data-testid="pickup-code">{sender.pickupCode}</strong>
         <span className="text-xs text-muted">
           {sender.pickupExpiresAt
@@ -314,7 +314,7 @@ function PickupCodeCard({
         </span>
       </div>
 
-      <p className="text-center text-xs font-bold leading-5 text-soft">
+      <p className="text-center text-xs font-normal leading-5 text-soft">
         {sender.phase === "complete"
           ? `${sender.winner?.toUpperCase() ?? "最快线路"} 已完成校验`
           : sender.phase === "preparing"
@@ -338,7 +338,7 @@ function PickupCodeCard({
           </SecondaryButton>
         )}
       </div>
-      {copyStatus && <p className="text-center text-xs font-bold text-primary" role="status">{copyStatus}</p>}
+      {copyStatus && <p className="text-center text-xs font-normal text-primary" role="status">{copyStatus}</p>}
     </div>
   );
 }

@@ -18,10 +18,10 @@ export function ProductBrand({
     >
       <BrandMark />
       <span className="min-w-0">
-        <strong className="block truncate text-[15px] font-semibold tracking-[-0.01em] text-ink sm:text-base">
+        <strong className="block truncate text-[15px] font-semibold text-ink sm:text-base">
           文件中转站
         </strong>
-        <span className="mt-0.5 block truncate font-mono text-xs font-bold tracking-[0.2em] text-muted uppercase">
+        <span className="mt-0.5 block truncate text-xs font-normal text-muted uppercase">
           Edge transfer
         </span>
       </span>

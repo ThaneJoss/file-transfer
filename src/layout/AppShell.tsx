@@ -96,7 +96,7 @@ function HeaderUsageSummary({ usage }: { usage: UsageSnapshot }) {
       data-testid="header-usage-summary"
       title={label}
     >
-      <span className="truncate font-mono text-xs font-bold text-muted">{label}</span>
+      <span className="truncate text-xs font-normal text-muted">{label}</span>
       <span
         className="h-1 overflow-hidden rounded-full bg-slate-200"
         role="progressbar"

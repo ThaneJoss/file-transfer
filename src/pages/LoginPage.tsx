@@ -21,7 +21,7 @@ export default function LoginPage() {
             <span className="eyebrow__signal" aria-hidden="true" />
             Passwordless identity
           </div>
-          <h1 className="mt-5 max-w-lg text-[clamp(32px,4vw,48px)] font-semibold leading-[1.25] tracking-[-0.06em] text-ink">
+          <h1 className="mt-5 max-w-lg text-[clamp(32px,4vw,48px)] font-semibold leading-[1.25] text-ink">
             身份验证，
             <span className="text-accent block">无需记住密码</span>
           </h1>
