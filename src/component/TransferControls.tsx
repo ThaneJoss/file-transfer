@@ -95,7 +95,7 @@ export function StatusMessage({
   return (
     <p
       aria-live={tone === "error" ? "assertive" : "polite"}
-      className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 text-[13px] font-semibold ${
+      className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 py-2 text-[13px] font-normal leading-6 ${
         tone === "error"
           ? "border-danger/25 bg-danger/10 text-danger"
           : "border-primary/20 bg-primary/10 text-primary-strong"
@@ -103,7 +103,7 @@ export function StatusMessage({
       role={tone === "error" ? "alert" : "status"}
       title={message}
     >
-      <span className="block min-w-0 truncate">{message}</span>
+      <span className="block min-w-0 break-words">{message}</span>
     </p>
   );
 }
