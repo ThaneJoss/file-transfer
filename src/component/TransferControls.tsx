@@ -98,7 +98,7 @@ export function StatusMessage({
       className={`flex min-h-11 min-w-0 items-center overflow-hidden rounded-xl border px-4 text-[13px] font-semibold ${
         tone === "error"
           ? "border-danger/25 bg-danger/10 text-danger"
-          : "border-primary/20 bg-primary/10 text-primary"
+          : "border-primary/20 bg-primary/10 text-primary-strong"
       }`}
       role={tone === "error" ? "alert" : "status"}
       title={message}
