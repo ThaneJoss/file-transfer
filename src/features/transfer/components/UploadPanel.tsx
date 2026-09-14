@@ -26,13 +26,12 @@ import { InlineStatus, ProgressCard, RouteDiagnostics } from "./TransferFeedback
 export function UploadLoginRequired({ sessionError }: { sessionError: string }) {
   return (
     <Panel className="access-gate" testId="transfer-login-required">
-      <div className="access-gate__glow" aria-hidden="true" />
       <span className="access-gate__icon">
         <ShieldCheck aria-hidden="true" size={27} />
       </span>
       <div className="relative">
         <span className="panel-kicker">Sender access</span>
-        <h2 className="mt-2 text-2xl font-black tracking-[-0.035em] text-ink">上传文件需要登录</h2>
+        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em] text-ink">上传文件需要登录</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">
           使用 Passkey 保护上传额度。接收方无需账号，打开分享链接即可安全接收。
         </p>
@@ -42,11 +41,11 @@ export function UploadLoginRequired({ sessionError }: { sessionError: string }) 
           </p>
         )}
       </div>
-      <Link className="button-primary relative inline-flex min-h-11 items-center gap-2 px-6 text-sm font-black" to="/login" state={{ from: "/" }}>
+      <Link className="button-primary relative inline-flex min-h-11 items-center gap-2 px-6 text-sm font-semibold" to="/login" state={{ from: "/" }}>
         <LogIn aria-hidden="true" size={17} />
         使用 Passkey 登录
       </Link>
-      <p className="relative font-mono text-[9px] font-bold tracking-[0.14em] text-subtle uppercase">
+      <p className="relative font-mono text-xs font-bold tracking-[0.14em] text-subtle uppercase">
         Passwordless · WebAuthn
       </p>
     </Panel>
@@ -95,7 +94,7 @@ export function UploadPanel({ sender }: { sender: FileSenderController }) {
       <header className="transfer-panel__header">
         <div>
           <span className="panel-kicker">01 · Prepare transfer</span>
-          <h2 className="mt-1.5 text-xl font-black tracking-[-0.03em] text-ink sm:text-2xl">上传文件</h2>
+          <h2 className="mt-1.5 text-xl font-semibold tracking-[-0.03em] text-ink sm:text-2xl">上传文件</h2>
           <p className="mt-1 text-xs leading-5 text-muted sm:text-sm">
             接收方加入前，不会发送文件正文。
           </p>
@@ -166,16 +165,16 @@ export function UploadPanel({ sender }: { sender: FileSenderController }) {
             </span>
             {sender.file ? (
               <div className="min-w-0" data-testid="selected-file">
-                <strong className="block max-w-[min(65vw,420px)] truncate text-base font-black text-ink" title={sender.file.name}>
+                <strong className="block max-w-[min(65vw,420px)] truncate text-base font-semibold text-ink" title={sender.file.name}>
                   {sender.file.name}
                 </strong>
-                <span className="mt-1 block font-mono text-[10px] font-bold tracking-[0.08em] text-muted">
+                <span className="mt-1 block font-mono text-xs font-bold tracking-[0.08em] text-muted">
                   {formatBytes(sender.file.size)} · READY
                 </span>
               </div>
             ) : (
               <div>
-                <strong className="block text-base font-black text-ink">拖拽文件到这里</strong>
+                <strong className="block text-base font-semibold text-ink">拖拽文件到这里</strong>
                 <span className="mt-1 block text-xs text-muted">或从设备中选择一个文件</span>
               </div>
             )}
@@ -268,8 +267,8 @@ function StrategyButton({
         <Icon aria-hidden="true" size={17} />
       </span>
       <span className="min-w-0 text-left">
-        <strong className="block truncate text-xs font-black text-ink">{label}</strong>
-        <small className="mt-0.5 block truncate text-[10px] font-semibold text-muted">{description}</small>
+        <strong className="block truncate text-xs font-semibold text-ink">{label}</strong>
+        <small className="mt-0.5 block truncate text-xs font-semibold text-muted">{description}</small>
       </span>
       <span className="strategy-switch__check" aria-hidden="true">
         <CheckCircle2 size={14} />
@@ -294,19 +293,19 @@ function PickupCodeCard({
   return (
     <div className="pickup-ticket" data-testid="upload-complete">
       <div className="pickup-ticket__header">
-        <span className="flex items-center gap-2 text-xs font-black text-positive">
+        <span className="flex items-center gap-2 text-xs font-semibold text-positive">
           {sender.phase === "complete"
             ? <CheckCircle2 aria-hidden="true" size={16} />
             : <Zap aria-hidden="true" size={16} />}
           {sender.phase === "complete" ? "传输已完成" : "等待接收方加入"}
         </span>
-        <span className="font-mono text-[9px] font-bold tracking-[0.1em] text-muted uppercase">
+        <span className="font-mono text-xs font-bold tracking-[0.1em] text-muted uppercase">
           One-time pickup
         </span>
       </div>
 
       <div className="pickup-ticket__code">
-        <span className="text-[10px] font-black tracking-[0.16em] text-muted uppercase">8 位取件码</span>
+        <span className="text-xs font-semibold tracking-[0.16em] text-muted uppercase">8 位取件码</span>
         <strong data-testid="pickup-code">{sender.pickupCode}</strong>
         <span className="text-xs text-muted">
           {sender.pickupExpiresAt

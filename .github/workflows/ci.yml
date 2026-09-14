@@ -61,7 +61,7 @@ jobs:
       matrix:
         include:
           - group: layout
-            specs: tests/e2e/navigation-layout.spec.ts
+            specs: tests/e2e/navigation-layout.spec.ts tests/e2e/accessibility.spec.ts
           - group: transfer
             specs: tests/e2e/transfer.spec.ts
           - group: auth

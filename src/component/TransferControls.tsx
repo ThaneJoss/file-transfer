@@ -21,7 +21,7 @@ export function TextInput({
 }) {
   return (
     <label className="grid min-w-0 gap-2">
-      <span className="min-w-0 truncate text-xs font-black tracking-[0.08em] text-muted uppercase" title={label}>{label}</span>
+      <span className="min-w-0 truncate text-xs font-semibold tracking-[0.08em] text-muted uppercase" title={label}>{label}</span>
       <input
         className="form-input h-12 min-w-0 px-4 text-[14px] font-semibold"
         value={value}
@@ -52,7 +52,7 @@ export function PrimaryButton({
 }) {
   return (
     <button
-      className={`button-primary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-5 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
+      className={`button-primary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-5 text-center text-[14px] font-semibold [overflow-wrap:anywhere] ${className}`}
       type={type}
       onClick={onClick}
       disabled={disabled}
@@ -75,7 +75,7 @@ export function SecondaryButton({
 }) {
   return (
     <button
-      className={`button-secondary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-4 text-center text-[14px] font-black [overflow-wrap:anywhere] ${className}`}
+      className={`button-secondary inline-flex min-h-11 max-w-full min-w-0 items-center justify-center gap-2 px-4 text-center text-[14px] font-semibold [overflow-wrap:anywhere] ${className}`}
       type="button"
       onClick={onClick}
       disabled={disabled}

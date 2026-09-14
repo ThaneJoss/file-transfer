@@ -75,7 +75,7 @@ function TransferLoading() {
         <LoaderCircle className="animate-spin" aria-hidden="true" size={24} />
       </span>
       <div>
-        <strong className="block text-sm font-black text-ink">正在建立安全会话</strong>
+        <strong className="block text-sm font-semibold text-ink">正在建立安全会话</strong>
         <p className="mt-1 text-xs text-muted" role="status">正在确认登录状态...</p>
       </div>
     </Panel>

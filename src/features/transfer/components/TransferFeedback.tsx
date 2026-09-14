@@ -45,7 +45,7 @@ export function RouteDiagnostics({
           </div>
         )}
         {supportId && (
-          <p className="mt-3 break-all font-mono text-[10px] leading-5 text-muted">
+          <p className="mt-3 break-all font-mono text-xs leading-5 text-muted">
             SUPPORT ID · {supportId}
           </p>
         )}

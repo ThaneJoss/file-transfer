@@ -46,7 +46,7 @@ export function AppShell({
                   <UserRound size={17} />
                 </span>
                 <span className="hidden min-w-0 sm:block">
-                  <span className="block max-w-32 truncate text-xs font-black text-ink">
+                  <span className="block max-w-32 truncate text-xs font-semibold text-ink">
                     {session.user.name || session.user.email}
                   </span>
                   <HeaderUsageSummary usage={usage} />
@@ -96,9 +96,9 @@ function HeaderUsageSummary({ usage }: { usage: UsageSnapshot }) {
       data-testid="header-usage-summary"
       title={label}
     >
-      <span className="truncate font-mono text-[9px] font-bold text-muted">{label}</span>
+      <span className="truncate font-mono text-xs font-bold text-muted">{label}</span>
       <span
-        className="h-1 overflow-hidden rounded-full bg-white/10"
+        className="h-1 overflow-hidden rounded-full bg-slate-200"
         role="progressbar"
         aria-label="本月文件用量比例"
         aria-valuemin={0}
