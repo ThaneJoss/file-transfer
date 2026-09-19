@@ -116,8 +116,8 @@ Cloudflare Worker。
 
 ### Cloudflare API Worker
 
-把现有 `file-transfer-api` Worker 的 Git 仓库连接改为
-`ThaneJoss/file-transfer`，并使用：
+现有 `file-transfer-api` Worker 已从 `ThaneJoss/file-transfer` 的 `main` 分支
+成功构建发布。维护以下配置：
 
 ```txt
 Production branch: main
@@ -135,8 +135,9 @@ Secret 名称。默认 `npx wrangler deploy` 不会自动执行 D1 migration；�
 项目的 Git 连接，这样 Runtime Secrets、D1 与 Durable Object 都继续留在原项目中；不要
 另建一个同名替代 Worker。
 
-原 `file-transfer-api` GitHub 仓库在新仓库成功生产部署前应保持不变；确认切换完成后再
-手动归档，避免两个仓库同时自动部署同一个 Worker。
+`ThaneJoss/file-transfer` 是前端与 API 的唯一维护仓库。旧 `file-transfer-api`
+GitHub 仓库已进入弃用收尾，不再承接开发或部署；同名 Cloudflare Worker 继续服务。
+部署证据、资源核对和剩余平台操作见 [迁移收尾记录](docs/deployment-migration.md)。
 
 ## 部署注意事项
 
