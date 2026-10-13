@@ -20,7 +20,6 @@ import {
 import type { ReceiveTarget } from "../protocol/fileStream";
 import { prepareSfuReceiver } from "../transports/sfu";
 import type {
-  SfuReceiverDescriptor,
   SfuSenderDescriptor,
   SfuTransportSession,
 } from "../transports/sfu";

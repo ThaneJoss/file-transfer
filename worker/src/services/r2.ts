@@ -8,6 +8,7 @@ const sha256HexPattern = /^[a-f0-9]{64}$/iu;
 function safePathSegment(value: string, fallback: string) {
   const sanitized = value
     .trim()
+    // eslint-disable-next-line no-control-regex -- Strip control characters from untrusted object-key segments.
     .replace(/[\u0000-\u001f\u007f/\\?#]+/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 120);

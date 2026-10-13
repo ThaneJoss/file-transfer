@@ -75,6 +75,7 @@ export function AppShell({
         className="app-page-slot flex min-h-0 min-w-0 flex-1 flex-col overflow-x-clip overflow-y-auto"
         data-testid="page-slot"
         id="main-content"
+        tabIndex={-1}
       >
         {children ?? <Outlet />}
       </section>

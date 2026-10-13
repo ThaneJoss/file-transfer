@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test";
 
 import {
   collectConsoleErrors,
@@ -7,12 +7,57 @@ import {
   installAppMocks,
 } from "./support/app";
 
+test("supports skipping navigation and manually activating transfer tabs with the keyboard", async ({ page }) => {
+  await installAppMocks(page);
+  await page.goto("/");
+  const upload = page.getByRole("tab", { name: /上传文件/ });
+  const download = page.getByRole("tab", { name: /下载文件/ });
+  const panel = page.getByRole("tabpanel");
+  await expect(page.getByTestId("upload-dropzone")).toBeVisible();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "跳到主要内容" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("page-slot")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(upload).toBeFocused();
+  await expect(download).toHaveAttribute("tabindex", "-1");
+
+  // Moving focus must not change direction: doing so cancels active transfers.
+  await page.keyboard.press("ArrowRight");
+  await expect(download).toBeFocused();
+  await expect(upload).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("upload-dropzone")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(download).toHaveAttribute("aria-selected", "true");
+  await expect(panel).toHaveAccessibleName(/下载文件/);
+  await expect(page.getByTestId("receiver-code")).toBeVisible();
+
+  await page.keyboard.press("Tab");
+  await expect(panel).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(download).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(upload).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(download).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(upload).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(download).toBeFocused();
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Space");
+  await expect(upload).toHaveAttribute("aria-selected", "true");
+  await expect(panel).toHaveAccessibleName(/上传文件/);
+});
+
 for (const viewport of [
+  { width: 320, height: 568 },
   { width: 1440, height: 900 },
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
 ]) {
-  test(`keeps the primary upload and download actions usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+  test(`keeps the primary upload and download actions usable at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     const consoleErrors = collectConsoleErrors(page);
     await installAppMocks(page);
@@ -20,12 +65,20 @@ for (const viewport of [
 
     await expect(page.getByTestId("unified-transfer-page")).toBeVisible();
     await expect(page.getByTestId("transfer-mode-upload")).toBeVisible();
+    // A 320px phone needs vertical scrolling; controls must remain reachable
+    // without shrinking text or requiring horizontal scrolling.
+    if (viewport.width === 320) await page.getByTestId("upload-dropzone").scrollIntoViewIfNeeded();
     await expect(page.getByTestId("upload-dropzone")).toBeInViewport();
     await expect(page.getByTestId("transfer-method-selector")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
+    await testInfo.attach(`upload-${viewport.width}px`, {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
 
     await page.getByTestId("transfer-mode-download").click();
     await expect(page.getByTestId("receiver-code")).toBeVisible();
+    if (viewport.width === 320) await page.getByTestId("receiver-code").scrollIntoViewIfNeeded();
     await expect(page.getByTestId("receiver-code")).toBeInViewport();
     const codeBox = await page.getByTestId("receiver-code").boundingBox();
     expect(codeBox).not.toBeNull();
@@ -33,6 +86,10 @@ for (const viewport of [
     expect(codeBox!.x + codeBox!.width).toBeLessThanOrEqual(viewport.width);
     await expectNoHorizontalOverflow(page);
     await expectNoConsoleErrors(consoleErrors);
+    await testInfo.attach(`download-${viewport.width}px`, {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
   });
 }
 

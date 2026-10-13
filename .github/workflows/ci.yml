@@ -6,6 +6,29 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
@@ -88,7 +111,7 @@ jobs:
         run: pnpm test:e2e ${{ matrix.specs }}
 
       - name: Upload Playwright report
-        if: failure()
+        if: failure() || matrix.group == 'layout'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-e2e-${{ matrix.group }}
@@ -121,12 +144,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [typecheck, unit, e2e, build]
+    needs: [lint, typecheck, unit, e2e, build]
     if: always()
     steps:
       - name: Check parallel CI results
         run: |
           failed=0
+
+          if [[ "${{ needs.lint.result }}" != "success" ]]; then
+            echo "lint: ${{ needs.lint.result }}"
+            failed=1
+          fi
 
           if [[ "${{ needs.typecheck.result }}" != "success" ]]; then
             echo "typecheck: ${{ needs.typecheck.result }}"

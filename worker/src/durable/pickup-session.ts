@@ -358,13 +358,12 @@ export class PickupSession extends DurableObject<Bindings> {
   private waitForChange(waitMs: number, observedVersion: number) {
     if (observedVersion !== this.changeVersion) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      let timer: ReturnType<typeof setTimeout>;
       const done = () => {
         globalThis.clearTimeout(timer);
         this.changeWaiters.delete(done);
         resolve();
       };
-      timer = globalThis.setTimeout(done, waitMs);
+      const timer = globalThis.setTimeout(done, waitMs);
       this.changeWaiters.add(done);
     });
   }
