@@ -103,7 +103,7 @@ Playwright 通过共享 fixture 拒绝未 mock 的外部 HTTP 请求并禁用 Se
 布局场景还覆盖 320 px 窄屏与键盘导航，并将 320 / 390 / 768 / 1440 px 上传、下载界面的
 截图附在本地 Playwright 报告中，供视觉复核。
 
-GitHub Actions 通过固定 SHA 的通用 reusable CI，自动发现并运行标准 `typecheck`、
+GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发现并运行标准 `typecheck`、
 `test`、`build` 脚本和高危依赖审计；存在 `lint` 脚本时也会自动执行。
 浏览器、axe、原生 RTC 和 Worker 专项验证保留为上述本地脚本，不由通用 auto 模式
 自动运行；涉及相关功能或依赖变动时，应单独执行并记录结果。
