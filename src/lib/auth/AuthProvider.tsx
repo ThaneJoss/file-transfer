@@ -84,6 +84,7 @@ const AuthContext = createContext<AuthContextValue>(defaultContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { data, isPending, error, refetch } = authClient.useSession();
+  const userId = data?.user.id;
   const [invalidated, setInvalidated] = useState(false);
   const [usage, setUsage] = useState<UsageSnapshot>(emptyUsage);
 
@@ -93,13 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refetch]);
 
   const refreshUsage = useCallback(async () => {
-    if (!data?.user || invalidated) {
+    if (!userId || invalidated) {
       setUsage(emptyUsage);
       return;
     }
     const response = await apiRequest<UsageApiResponse>("/v1/usage", { cache: "no-store" });
     setUsage(normalizeUsageResponse(response));
-  }, [data?.user, invalidated]);
+  }, [userId, invalidated]);
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -118,12 +119,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUsage]);
 
   useEffect(() => {
-    if (data?.user && !invalidated) {
+    if (userId && !invalidated) {
       void refreshUsage().catch(() => setUsage(emptyUsage));
     } else {
       setUsage(emptyUsage);
     }
-  }, [data?.user, invalidated, refreshUsage]);
+  }, [userId, invalidated, refreshUsage]);
 
   const value = useMemo<AuthContextValue>(() => ({
     session: invalidated ? null : data,

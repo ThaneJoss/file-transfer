@@ -21,15 +21,21 @@ test("supports skipping navigation and manually activating transfer tabs with th
   await expect(page.getByTestId("page-slot")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(upload).toBeFocused();
+  await expect(upload).toHaveCSS("outline-color", "rgb(255, 255, 255)");
+  await expect(upload).toHaveCSS("outline-width", "3px");
+  await expect(page.locator(".transfer-mode-switch__indicator")).toHaveCSS("background-color", "rgb(37, 99, 235)");
   await expect(download).toHaveAttribute("tabindex", "-1");
 
   // Moving focus must not change direction: doing so cancels active transfers.
   await page.keyboard.press("ArrowRight");
   await expect(download).toBeFocused();
+  await expect(download).toHaveCSS("outline-color", "rgb(37, 99, 235)");
   await expect(upload).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("upload-dropzone")).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(download).toHaveAttribute("aria-selected", "true");
+  await expect(download).toBeFocused();
+  await expect(download).toHaveCSS("outline-color", "rgb(255, 255, 255)");
   await expect(panel).toHaveAccessibleName(/下载文件/);
   await expect(page.getByTestId("receiver-code")).toBeVisible();
 

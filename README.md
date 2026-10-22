@@ -89,11 +89,10 @@ pnpm check:all
 真实 Chromium 页面之间使用原生 `RTCPeerConnection` 完成一次传输，用来捕获真实浏览器
 对象序列化和 DataChannel 编排问题。
 
-每个 PR 的 `CI` 工作流并行运行 lint、前端类型检查、单元测试、四组 Playwright 场景与
-生产构建（含 bundle budget），由 `test` 汇总各项结果。ESLint 覆盖前端、Worker、测试
+ESLint 覆盖前端、Worker、测试
 与构建脚本，并检查 React Hook 的调用规则和依赖；生成的绑定类型不参与 lint。
-`Worker CI` 在 Worker、共享依赖或构建路由脚本变更时执行 Worker 类型检查、集成测试、
-绑定类型同步检查和本地打包 dry-run。测试使用本地运行时及 mock，不需要线上凭据。
+Worker 专项脚本执行类型检查、集成测试、绑定类型同步检查和本地打包 dry-run。
+测试使用本地运行时及 mock，不需要线上凭据。
 
 Playwright 通过共享 fixture 拒绝未 mock 的外部 HTTP 请求并禁用 Service Worker，
 防止测试误访问线上 API；原生 WebRTC 场景仅使用本机直连，不访问外部 STUN / TURN。
@@ -102,7 +101,12 @@ Playwright 通过共享 fixture 拒绝未 mock 的外部 HTTP 请求并禁用 Se
 账户页，并在 390 px、768 px 与桌面布局上验证自动可检测的无障碍规则。视觉系统的所有
 动效都在用户启用“减少动态效果”时自动关闭。
 布局场景还覆盖 320 px 窄屏与键盘导航，并将 320 / 390 / 768 / 1440 px 上传、下载界面的
-截图附在 Playwright 报告中；CI 无论该组成功或失败都会保留报告，供视觉复核。
+截图附在本地 Playwright 报告中，供视觉复核。
+
+GitHub Actions 通过固定 SHA 的通用 reusable CI，自动发现并运行标准 `typecheck`、
+`test`、`build` 脚本和高危依赖审计；存在 `lint` 脚本时也会自动执行。
+浏览器、axe、原生 RTC 和 Worker 专项验证保留为上述本地脚本，不由通用 auto 模式
+自动运行；涉及相关功能或依赖变动时，应单独执行并记录结果。
 
 生产构建会生成 Vite manifest 并执行 bundle budget：初始静态 JS 不超过 115 KiB gzip、最大单块不超过 95 KiB gzip、全部 JS 不超过 175 KiB gzip。首页、登录页、账户页、R2 签名器和哈希 Worker 分块加载；阈值可用对应的 `BUNDLE_MAX_*_KIB` 环境变量临时覆盖。
 
