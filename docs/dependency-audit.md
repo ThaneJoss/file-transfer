@@ -10,7 +10,7 @@
 | 下载 | 原生 `fetch`、ReadableStream、File System Access API | 支持流式校验与直接落盘；不支持文件句柄的浏览器使用 128 MiB 内存上限 | 完整、截断、超长、篡改和取消单测/e2e |
 | 状态与生命周期 | 三个小型 React hooks + `AbortController` | 状态局限在一个产品流，引入 XState 的体积与迁移成本不划算 | 生命周期竞态单测、取消 e2e |
 | 路由 | React Router | 只保留 `/`、`/login`、`/account`；旧技术路径统一回首页 | 布局与导航 e2e |
-| 浏览器回归 | Playwright | 覆盖桌面、平板、移动布局以及上传/下载行为；CI 使用 runner 自带 Chrome | 三组并行 CI e2e |
+| 浏览器回归 | Playwright | 覆盖桌面、平板、移动布局以及上传/下载行为 | `pnpm test:e2e` 本地专项验证，通用 auto CI 不自动运行 |
 | 无障碍回归 | `@axe-core/playwright` | 只进入测试工具链，不增加生产 bundle；覆盖访客、登录、账户与 390 / 768 / 1440 px 布局 | 6 个 axe 场景 |
 
 上传服务和协议下载路由均为动态导入：初始页面不加载签名与下载实现。AWS SDK v3、状态机库和额外 schema 库目前都不会带来与 bundle 成本相称的收益，因此未引入。
@@ -29,3 +29,15 @@
   --registry=https://registry.npmjs.org` 仍报告 Drizzle CLI 的旧 esbuild 链；旧
   esbuild 只存在于本地 schema CLI 链且暂无干净的上游升级路径，因此不使用强制
   override 改变依赖解析。
+
+## 2026-10-22 通用 CI 审计修复
+
+- 更新 Hono、Vite 和 Vitest / coverage 到当前主版本内已修复版本，并刷新
+  nanoid、source-map-js 的兼容传递依赖。
+- 将上游标记为错误发布、包含破坏性变动的 `@testing-library/jest-dom@6.10.0`
+  回退到上游推荐的受支持 6.x 版本 `6.9.1`，不引入 7.x 迁移。
+- 现有 Miniflare 4 精确锁定了 `undici@7.28.0` 与 `sharp@0.35.2`。对这两个
+  版本分别使用 `7.29.1` 与 `0.35.5` 安全补丁 override，保留现有测试池 API，
+  不迁移到 Miniflare 5 预发布版本；后续上游稳定升级移除旧 pin 时可删除 override。
+- `pnpm audit --audit-level=high` 已通过，仅余 Drizzle CLI 的旧 esbuild moderate
+  公告。审计阈值未降低，也未添加漏洞忽略项；测试源码和通用 CI 固定引用均保留。

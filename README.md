@@ -92,6 +92,11 @@ pnpm check:all
 账户页，并在 390 px、768 px 与桌面布局上验证自动可检测的无障碍规则。视觉系统的所有
 动效都在用户启用“减少动态效果”时自动关闭。
 
+GitHub Actions 通过固定 SHA 的通用 reusable CI，自动发现并运行标准 `typecheck`、
+`test`、`build` 脚本和高危依赖审计；存在 `lint` 脚本时也会自动执行。
+浏览器、axe、原生 RTC 和 Worker 专项验证保留为上述本地脚本，不由通用 auto 模式
+自动运行；涉及相关功能或依赖变动时，应单独执行并记录结果。
+
 生产构建会生成 Vite manifest 并执行 bundle budget：初始静态 JS 不超过 115 KiB gzip、最大单块不超过 95 KiB gzip、全部 JS 不超过 175 KiB gzip。首页、登录页、账户页、R2 签名器和哈希 Worker 分块加载；阈值可用对应的 `BUNDLE_MAX_*_KIB` 环境变量临时覆盖。
 
 ## 独立部署
