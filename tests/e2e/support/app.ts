@@ -221,6 +221,9 @@ export async function installAppMocks(page: Page, options: AppMockOptions = {}) 
   await page.route(`${apiBaseUrl}/v1/diagnostics/transfers`, (route) =>
     route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ accepted: true }) }),
   );
+  await page.route(`${apiBaseUrl}/v1/usage/transfers`, (route) =>
+    route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ recorded: true }) }),
+  );
   await page.route(`${apiBaseUrl}/v1/pickups`, async (route) => {
     const body = await route.request().postDataJSON() as { offer?: string; variant: string };
     postedOffer = body.offer ?? "";
@@ -348,6 +351,14 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
   const winnerReady = deferredSignal();
 
   await context.addInitScript(() => {
+    // Keep real browser DataChannels, but restrict ICE gathering to local host
+    // candidates so CI never contacts a public STUN/TURN service.
+    const NativePeerConnection = window.RTCPeerConnection;
+    window.RTCPeerConnection = class extends NativePeerConnection {
+      constructor(configuration?: RTCConfiguration) {
+        super({ ...configuration, iceServers: [] });
+      }
+    };
     window.__appTest = { downloads: 0, objectUrls: { created: 0, revoked: 0 }, clipboardText: "" };
     Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
     Object.defineProperty(navigator, "clipboard", {

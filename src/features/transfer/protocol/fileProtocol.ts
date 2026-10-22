@@ -326,6 +326,7 @@ function isNonNegativeSafeInteger(value: unknown): value is number { return type
 function isPositiveSafeInteger(value: unknown): value is number { return isNonNegativeSafeInteger(value) && value > 0; }
 function isFinitePositive(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value > 0; }
 function encodedLength(value: unknown) { try { return JSON.stringify(value).length; } catch { return Number.POSITIVE_INFINITY; } }
+// eslint-disable-next-line no-control-regex -- Reject control characters in untrusted filenames.
 function hasUnsafeFileName(value: string) { return /[\u0000-\u001f\u007f/\\]/.test(value); }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function protocolError() { return new Error("文件传输协议格式不正确。"); }

@@ -20,6 +20,7 @@ export function FileTransferPage() {
     () => /^\d{8}$/.test(initialCode) ? "download" : "upload",
   );
   const sender = useFileSender();
+  const { busy: senderBusy, cancel: cancelSender } = sender;
   const receiver = useFileReceiver({
     allowGuest: !isPending && !session?.user,
     initialCode,
@@ -27,8 +28,8 @@ export function FileTransferPage() {
 
   useEffect(() => {
     if (isPending || session?.user) return;
-    if (sender.busy) sender.cancel();
-  }, [isPending, sender.busy, sender.cancel, session?.user]);
+    if (senderBusy) cancelSender();
+  }, [isPending, senderBusy, cancelSender, session?.user]);
 
   const switchMode = (nextMode: TransferDirection) => {
     if (nextMode === mode) return;
@@ -48,8 +49,9 @@ export function FileTransferPage() {
         <TransferModeSwitch mode={mode} onChange={switchMode} />
         <div
           aria-labelledby={`transfer-tab-${mode}`}
-          id={`transfer-panel-${mode}`}
+          id="transfer-panel"
           role="tabpanel"
+          tabIndex={0}
         >
           {isPending
             ? <TransferLoading />

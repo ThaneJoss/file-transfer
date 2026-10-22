@@ -124,6 +124,7 @@ export function normalizeRegistrationName(value: unknown) {
   }
   const name = value.trim();
   const length = Array.from(name).length;
+  // eslint-disable-next-line no-control-regex -- Registration names must not contain control characters.
   if (length < 1 || length > 80 || /[\u0000-\u001f\u007f]/u.test(name)) {
     return null;
   }

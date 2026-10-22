@@ -27,7 +27,7 @@
 
 - `worker/`：从原 `file-transfer-api` 仓库迁入的 Cloudflare Worker 源码，包含
   D1 migration、Durable Object 和测试；根目录 `wrangler.jsonc` 是部署配置。
-- `src/styles.css`：Tailwind CSS 4 设计令牌、深色边缘网络视觉系统、响应式规则和
+- `src/styles.css`：Tailwind CSS 4 设计令牌、与 webapps 一致的浅色视觉系统、响应式规则和
   `prefers-reduced-motion` 降级策略。
 - `src/component/ProductBrand.tsx`：首页、登录页与账户页复用的品牌标识。
 - `src/features/transfer/FileTransferPage.tsx`：只负责上传/下载方向、登录状态和
@@ -70,6 +70,7 @@ pnpm dev:worker
 ## 验证
 
 ```bash
+pnpm lint
 pnpm typecheck
 pnpm test:unit
 pnpm test:e2e
@@ -82,15 +83,25 @@ pnpm worker:dry-run
 pnpm check:all
 ```
 
-`pnpm check` 串行执行完整前端检查；`pnpm check:all` 在此基础上继续验证 Worker
+`pnpm check` 串行执行 lint 和完整前端检查；`pnpm check:all` 在此基础上继续验证 Worker
 构建、类型、测试与 dry-run。单元测试覆盖 Worker 哈希、multipart 恢复、长轮询客户端、
 路由超时、极速去重、完整性和取消。Playwright 除常规 API / R2 mock 场景外，还会在两个
 真实 Chromium 页面之间使用原生 `RTCPeerConnection` 完成一次传输，用来捕获真实浏览器
 对象序列化和 DataChannel 编排问题。
 
+ESLint 覆盖前端、Worker、测试
+与构建脚本，并检查 React Hook 的调用规则和依赖；生成的绑定类型不参与 lint。
+Worker 专项脚本执行类型检查、集成测试、绑定类型同步检查和本地打包 dry-run。
+测试使用本地运行时及 mock，不需要线上凭据。
+
+Playwright 通过共享 fixture 拒绝未 mock 的外部 HTTP 请求并禁用 Service Worker，
+防止测试误访问线上 API；原生 WebRTC 场景仅使用本机直连，不访问外部 STUN / TURN。
+
 `tests/e2e/accessibility.spec.ts` 使用 axe 检查访客首页、登录态首页、Passkey 登录页和
 账户页，并在 390 px、768 px 与桌面布局上验证自动可检测的无障碍规则。视觉系统的所有
 动效都在用户启用“减少动态效果”时自动关闭。
+布局场景还覆盖 320 px 窄屏与键盘导航，并将 320 / 390 / 768 / 1440 px 上传、下载界面的
+截图附在本地 Playwright 报告中，供视觉复核。
 
 GitHub Actions 通过固定 SHA 的通用 reusable CI，自动发现并运行标准 `typecheck`、
 `test`、`build` 脚本和高危依赖审计；存在 `lint` 脚本时也会自动执行。
