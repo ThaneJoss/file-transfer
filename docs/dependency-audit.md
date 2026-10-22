@@ -29,3 +29,13 @@
   --registry=https://registry.npmjs.org` 仍报告 Drizzle CLI 的旧 esbuild 链；旧
   esbuild 只存在于本地 schema CLI 链且暂无干净的上游升级路径，因此不使用强制
   override 改变依赖解析。
+
+## 2026-10-22 通用 CI 审计修复
+
+- 更新 Hono、Vite 和 Vitest / coverage 到当前主版本内已修复版本，并刷新
+  nanoid、source-map-js 的兼容传递依赖。
+- 现有 Miniflare 4 精确锁定了 `undici@7.28.0` 与 `sharp@0.35.2`。对这两个
+  版本分别使用 `7.29.1` 与 `0.35.5` 安全补丁 override，保留现有测试池 API，
+  不迁移到 Miniflare 5 预发布版本；后续上游稳定升级移除旧 pin 时可删除 override。
+- `pnpm audit --audit-level=high` 已通过，仅余 Drizzle CLI 的旧 esbuild moderate
+  公告。审计阈值未降低，也未添加漏洞忽略项；测试源码和通用 CI 固定引用均保留。
