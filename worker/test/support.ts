@@ -4,7 +4,7 @@ import type { Bindings } from "../src/types";
 
 const { default: app } = await import("../src/index");
 
-const apiOrigin = "https://api.file.thanejoss.com";
+const apiOrigin = "https://file.thanejoss.com";
 const appOrigin = "https://file.thanejoss.com";
 export const bindings = env as unknown as Bindings;
 export type CookieJar = Map<string, string>;
@@ -17,13 +17,13 @@ function updateCookies(response: Response, jar: CookieJar) {
   }
 }
 
-export async function request(path: string, init: RequestInit = {}, jar?: CookieJar) {
+export async function request(path: string, init: RequestInit = {}, jar?: CookieJar, origin = apiOrigin) {
   const headers = new Headers(init.headers);
   headers.set("Origin", appOrigin);
   if (jar?.size) {
     headers.set("Cookie", Array.from(jar, ([name, value]) => `${name}=${value}`).join("; "));
   }
-  return app.fetch(new Request(`${apiOrigin}${path}`, { ...init, headers }), bindings);
+  return app.fetch(new Request(`${origin}${path}`, { ...init, headers }), bindings);
 }
 
 export async function registerUser(label: string) {

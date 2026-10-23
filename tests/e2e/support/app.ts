@@ -1,6 +1,6 @@
 import { expect, type BrowserContext, type Page } from "@playwright/test";
 
-export const apiBaseUrl = "https://api.file.thanejoss.com";
+export const apiBaseUrl = (process.env.VITE_API_BASE_URL || "http://127.0.0.1:5173").replace(/\/+$/, "");
 export const r2Origin = "https://example-account.r2.cloudflarestorage.com";
 
 export function testAuthSession() {
@@ -378,6 +378,9 @@ export async function installRealRtcTransferMocks(context: BrowserContext) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    // API and the page now share an origin. Let HTML and Vite assets reach the
+    // local app server instead of the API-only mock response below.
+    if (!path.startsWith("/api/") && !path.startsWith("/v1/")) return route.fallback();
     const method = request.method();
     const json = (body: unknown, status = 200) => route.fulfill({
       status,

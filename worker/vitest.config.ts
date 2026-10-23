@@ -31,7 +31,7 @@ export default defineConfig({
             fileURLToPath(new URL("./migrations", import.meta.url)),
           ),
           BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
-          BETTER_AUTH_URL: "https://api.file.thanejoss.com",
+          BETTER_AUTH_URL: "https://file.thanejoss.com",
           APP_ORIGIN: "https://file.thanejoss.com",
           TURN_KEY_ID: "test",
           TURN_KEY_API_TOKEN: "test",

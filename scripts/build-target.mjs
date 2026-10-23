@@ -19,18 +19,19 @@ function runPnpm(args) {
   }
 }
 
-// Workers Builds sets WORKERS_CI for both projects. An explicit target lets the
-// frontend build assets while preserving the existing API project's command.
-const target = process.argv[2] ?? (process.env.WORKERS_CI === "1" ? "worker" : "frontend");
-
-if (target === "worker") {
-  console.log("[build] Cloudflare Workers target");
+// One release contains the API and frontend assets, in local and CI builds.
+// The frontend-only target is useful for starting the local API dev server.
+const target = process.argv[2] ?? "all";
+if (!["all", "frontend", "worker"].includes(target)) {
+  throw new Error(`Unknown build target: ${target}`);
+}
+if (target === "all" || target === "worker") {
+  console.log("[build] Worker API typecheck");
   runPnpm(["exec", "tsc", "--noEmit", "-p", "worker/tsconfig.json"]);
-} else if (target === "frontend") {
-  console.log("[build] Frontend static assets target");
+}
+if (target === "all" || target === "frontend") {
+  console.log("[build] Frontend static assets");
   runPnpm(["exec", "tsc", "-b"]);
   runPnpm(["exec", "vite", "build"]);
   runPnpm(["run", "check:bundle"]);
-} else {
-  throw new Error(`Unknown build target: ${target}`);
 }

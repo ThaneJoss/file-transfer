@@ -10,7 +10,7 @@ describe("verified transfer usage", () => {
     const usageChanged = vi.fn();
     window.addEventListener(API_USAGE_CHANGED_EVENT, usageChanged);
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/usage/transfers", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/usage/transfers`, async ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(await request.json()).toEqual({
           service: "sfu",
@@ -34,7 +34,7 @@ describe("verified transfer usage", () => {
     const usageChanged = vi.fn();
     window.addEventListener(API_USAGE_CHANGED_EVENT, usageChanged);
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/usage/transfers", () =>
+      http.post(`${window.location.origin}/v1/usage/transfers`, () =>
         HttpResponse.json({ error: "temporarily unavailable" }, { status: 503 }),
       ),
     );

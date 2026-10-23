@@ -21,12 +21,12 @@ describe("pickup API service", () => {
     const usageChanged = vi.fn();
     window.addEventListener(API_USAGE_CHANGED_EVENT, usageChanged);
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/pickups", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/pickups`, async ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(await request.json()).toEqual({ variant: "multipath", offer: "offer" });
         return HttpResponse.json({ code: "12345678", expiresAt: 123 }, { status: 201 });
       }),
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678", () =>
+      http.get(`${window.location.origin}/v1/pickups/12345678`, () =>
         HttpResponse.json({ status: "found", variant: "multipath", offer: "offer", expiresAt: 123, answered: false }),
       ),
     );
@@ -39,7 +39,7 @@ describe("pickup API service", () => {
 
   it("treats a null answer as pending data instead of a string", async () => {
     server.use(
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/answer", () =>
+      http.get(`${window.location.origin}/v1/pickups/12345678/answer`, () =>
         HttpResponse.json({ answer: null }),
       ),
     );
@@ -50,15 +50,15 @@ describe("pickup API service", () => {
     let lookups = 0;
     const onPending = vi.fn();
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/pickups", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/pickups`, async ({ request }) => {
         expect(await request.json()).toEqual({ variant: "multipath" });
         return HttpResponse.json({ code: "12345678", expiresAt: Date.now() + 60_000 }, { status: 201 });
       }),
-      http.put("https://api.file.thanejoss.com/v1/pickups/12345678/offer", async ({ request }) => {
+      http.put(`${window.location.origin}/v1/pickups/12345678/offer`, async ({ request }) => {
         expect(await request.json()).toEqual({ offer: "ready-offer" });
         return HttpResponse.json({ accepted: true });
       }),
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678", () => {
+      http.get(`${window.location.origin}/v1/pickups/12345678`, () => {
         lookups += 1;
         return lookups === 1
           ? HttpResponse.json({ status: "pending", variant: "multipath", expiresAt: Date.now() + 60_000 }, { status: 202 })
@@ -91,7 +91,7 @@ describe("pickup API service", () => {
   it("retries a transient coordination failure", async () => {
     let requests = 0;
     server.use(
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/selection", () => {
+      http.get(`${window.location.origin}/v1/pickups/12345678/selection`, () => {
         requests += 1;
         return requests === 1
           ? HttpResponse.json({ error: "temporarily unavailable" }, { status: 503 })
@@ -107,11 +107,11 @@ describe("pickup API service", () => {
 
   it("coordinates cancellation and validates status data", async () => {
     server.use(
-      http.put("https://api.file.thanejoss.com/v1/pickups/12345678/cancel", async ({ request }) => {
+      http.put(`${window.location.origin}/v1/pickups/12345678/cancel`, async ({ request }) => {
         expect(await request.json()).toEqual({});
         return HttpResponse.json({ cancelled: true });
       }),
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/status", () =>
+      http.get(`${window.location.origin}/v1/pickups/12345678/status`, () =>
         HttpResponse.json({ cancelled: false, expiresAt: Date.now() + 60_000 }),
       ),
     );
@@ -121,7 +121,7 @@ describe("pickup API service", () => {
 
   it("turns a remote cancellation into a user-facing coordination error", async () => {
     server.use(
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/status", () =>
+      http.get(`${window.location.origin}/v1/pickups/12345678/status`, () =>
         HttpResponse.json({ cancelled: true, expiresAt: Date.now() + 60_000 }),
       ),
     );
@@ -133,7 +133,7 @@ describe("pickup API service", () => {
   it("claims one pickup for a guest and scopes subsequent coordination with its token", async () => {
     const expiresAt = Date.now() + 60_000;
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/pickups/12345678/guest", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/pickups/12345678/guest`, async ({ request }) => {
         expect(await request.json()).toEqual({});
         expect(request.headers.get("x-pickup-guest-token")).toBeNull();
         return HttpResponse.json({
@@ -148,7 +148,7 @@ describe("pickup API service", () => {
           },
         }, { status: 201 });
       }),
-      http.get("https://api.file.thanejoss.com/v1/pickups/12345678/status", ({ request }) => {
+      http.get(`${window.location.origin}/v1/pickups/12345678/status`, ({ request }) => {
         expect(request.headers.get("x-pickup-guest-token")).toBe("guest-token");
         expect(new URL(request.url).searchParams.get("wait")).toBe("20000");
         return HttpResponse.json({ cancelled: false, expiresAt });

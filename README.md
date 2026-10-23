@@ -49,23 +49,33 @@
 
 ## 本地开发
 
-要求 Node.js 24+ 和 pnpm 11.15.1。
+要求 Node.js 24+ 和 pnpm 11.15.1。前端与 API 共用依赖、锁文件及根目录
+`wrangler.jsonc`；生产以一个 `file-transfer` Worker 发布。
+
+首次初始化：
 
 ```bash
 pnpm install --frozen-lockfile
-cp .env.example .env.local
+cp .dev.vars.example .dev.vars
+pnpm db:migrations:apply:local
+```
+
+分别在两个终端运行：
+
+```bash
+pnpm dev:worker
+```
+
+```bash
 pnpm dev
 ```
 
-`VITE_API_BASE_URL` 可选；不设置时使用 `https://api.file.thanejoss.com`。API 负责 Passkey 会话、访客取件令牌、短期 TURN / R2 凭据、SFU 代理、取件协调和脱敏诊断；浏览器不会持有长期服务密钥。
+`pnpm dev` 保持 Vite 热更新体验，默认地址为 `http://localhost:5173`。
+页面默认请求同源 API，Vite 将 API 路径代理到 `http://localhost:8787` 的本地 Worker。
+`pnpm dev:worker` 先构建一次前端资源，再启动 Wrangler；后端改动由 Wrangler 重新加载。
 
-API Worker 与前端共用根目录依赖和锁文件。首次开发时另开终端执行：
-
-```bash
-cp .dev.vars.example .dev.vars
-pnpm db:migrations:apply:local
-pnpm dev:worker
-```
+`.env.local` 中的 `VITE_API_BASE_URL` 只用于需要访问其他 API 地址的场景；通常不必设置。
+可参考 `.env.example`。浏览器不持有长期服务密钥，开发密钥放在被 Git 忽略的 `.dev.vars`。
 
 ## 验证
 
@@ -80,8 +90,6 @@ pnpm test:worker
 WORKERS_CI=1 pnpm build
 pnpm worker:types:check
 pnpm worker:dry-run
-pnpm build:frontend
-pnpm frontend:dry-run
 pnpm check:all
 ```
 
@@ -114,52 +122,59 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 
 ## GitHub 自动部署到 Cloudflare
 
-前端和 API 都由 `ThaneJoss/file-transfer` 自动部署到 Cloudflare，生产分支为 `main`。
-本地仍使用 `pnpm dev`、`pnpm dev:worker` 和 `pnpm build`，无需改变开发方式。
+网页、静态资源和 API 由同一个 Cloudflare Worker `file-transfer` 提供，统一使用
+`https://file.thanejoss.com`。`worker/` 是同一项目中的服务端源码目录，不是第二个部署项目。
 
-| 项目 | 前端 | API |
-| --- | --- | --- |
-| Worker | `file-transfer` | `file-transfer-api` |
-| 域名 | `https://file.thanejoss.com` | `https://api.file.thanejoss.com` |
-| Wrangler 配置 | `wrangler.frontend.jsonc` | `wrangler.jsonc` |
-| Build command | `pnpm run build:frontend` | `pnpm run build` |
-| Deploy command | `pnpm exec wrangler deploy --config wrangler.frontend.jsonc` | `npx wrangler deploy` |
-| 非生产分支 | `pnpm exec wrangler versions upload --config wrangler.frontend.jsonc` | `npx wrangler versions upload` |
+| 配置 | 值 |
+| --- | --- |
+| GitHub 仓库 / 生产分支 | `ThaneJoss/file-transfer` / `main` |
+| Worker / Wrangler 配置 | `file-transfer` / `wrangler.jsonc` |
+| Build command | `pnpm run build` |
+| Deploy command | `npx wrangler deploy` |
+| 非生产分支版本上传 | `npx wrangler versions upload` |
+| Root Directory | 仓库根目录 |
 
-两个 Workers Builds 项目都连接同一仓库，Root Directory 保持仓库根目录。
-推送 `main` 自动发布生产版本；其他分支自动上传预览版本。前端构建变量为
-`NODE_VERSION=24`、`PNPM_VERSION=11.15.1`，依赖版本由根目录锁文件固定。
-GitHub 继续使用现有共享 CI，并额外检查 Cloudflare 前端构建与发布 dry-run。
+推送 `main` 自动构建并发布整个应用；其他分支自动构建并上传候选版本，不切换生产流量。
+`pnpm build` 同时构建前端并检查 Worker，Cloudflare 注入的 `WORKERS_CI=1`
+不会改变构建目标。仓库只维护一份 Wrangler 配置，以及生产发布和分支版本上传触发器。
 
-Cloudflare 自动注入 `WORKERS_CI=1`。原 `pnpm build` 在这个环境下仍只检查 API；
-新 `pnpm build:frontend` 显式选择前端，确保生成 `dist/`，不会误走 API 构建。
-API 的原 Worker、Runtime Secrets、D1、Durable Object 和 R2 保持原有归属。
-前端为纯静态资源 Worker，不需要服务端密钥。
+当前 Worker 绑定 Durable Objects，legacy `wrangler versions upload` 不生成在线预览
+链接（实测版本 `has_preview: false`）。可用 `pnpm dev:worker` 启动本地 Wrangler
+验证完整应用；分支上传成功仅表示候选版本已保存。
 
-手动发布或验证前端：
+手动发布或验证：
 
 ```bash
-pnpm build:frontend
-pnpm frontend:dry-run
-pnpm deploy:frontend
-# 非生产预览，不替换生产版本：
-pnpm preview:frontend
+pnpm build
+pnpm worker:dry-run
+pnpm run deploy
+# 上传候选版本，不替换生产版本，也不生成在线预览链接：
+pnpm preview:worker
 ```
 
-前端预览 URL 可检查界面，但生产 Passkey、API 和 R2 的 Origin 限制仍绑定
-`file.thanejoss.com`。完整登录与传输使用生产域名或已有本地开发环境；不要为预览放宽生产允许列表。
+`pnpm run deploy` 依次构建应用、执行待处理的 D1 migration、发布 Worker；
+旧命令 `pnpm deploy:worker` 保留为它的兼容入口。
+Cloudflare 的默认 `npx wrangler deploy` 不自动执行 D1 migration，含新 migration
+的提交仍需在生产发布前运行 `pnpm db:migrations:apply:remote`。
 
-API 默认发布命令不自动应用 D1 migration。包含新 migration 的改动在生产发布前先运行
-`pnpm db:migrations:apply:remote`，或使用 `pnpm deploy:worker`。
+原 `file-transfer-api` Worker 通过原地改名保留内部身份、Runtime Secrets 和
+Durable Object namespace，D1 与 R2 沿用原资源。旧地址 `api.file.thanejoss.com`
+作为同一个 Worker 的兼容域名保留，供旧客户端和受 Cloudflare Access 保护的管理页使用。
+公开站点和其他非管理主机不开放 `/admin` 和 `/admin/*`。
 
-`ThaneJoss/file-transfer` 是唯一维护仓库；旧 `file-transfer-api` GitHub 仓库仅保留历史。
-Vercel 配置保留用于回滚参考，生产域名由 Cloudflare 托管。
-资源核对、部署证据和回滚方法见 [迁移记录](docs/deployment-migration.md)。
+Passkey 的 RP ID 仍为 `file.thanejoss.com`，已有 Passkey 可继续使用。
+浏览器会话 Cookie 从旧 API 主机改为站点主机后，现有用户可能需要重新登录一次。
+完整 Passkey 登录与传输使用生产域名或本地开发环境；生产 Origin 允许列表不为
+其他测试域名放宽。
+
+`ThaneJoss/file-transfer` 是唯一维护仓库；旧 API GitHub 仓库仅保留历史。
+资源、平台设置和回滚说明见 [迁移记录](docs/deployment-migration.md)。
 
 ## 部署注意事项
 
-- 涉及前后端协议的联合改动，先部署 API 与所需 D1 migration，再部署前端。
+- 前后端随同一个 Worker 版本发布；有数据库结构变化时，先应用兼容的 D1 migration。
 - R2 CORS 必须允许站点 Origin、`GET` / `PUT` / `POST` / `DELETE`、签名请求头，并暴露 `ETag`、`Content-Length` 和 `Content-Type`；仓库中的 `worker/config/r2-cors.json` 是对应配置。
-- 前端为所有页面设置 CSP、HSTS、COOP、CORP、Permissions Policy、Referrer Policy、`nosniff` 和防嵌入响应头；若更换 API 或 R2 域名，需要同步更新 `public/_headers` 的 `connect-src`。
-- `/assets/*` 使用内容哈希和长期不可变缓存，其他路径回退到 `index.html`。模块脚本保留 `data-cfasync="false"`，避免 Cloudflare Rocket Loader 改写启动脚本。
+- 静态页面安全响应头由 `public/_headers` 设置，API 响应头由 Worker 设置。若更换 R2 域名或增加外部 API，需要同步检查 CSP 的 `connect-src`。Cloudflare zone 的 HSTS 设置可能覆盖应用头。
+- 哈希资源 `/assets/*` 使用长期不可变缓存，页面路由回退到 `index.html`；API、健康检查和管理员路径交给 Worker，未知 API 返回错误而非 SPA HTML。
+- `file.thanejoss.com` 的 Cloudflare Configuration Rule 关闭自动统计脚本注入，保持现有 CSP；模块脚本保留 `data-cfasync="false"`。
 - 临时对象和未完成 multipart 的最终清理由对象存储生命周期规则负责；前端恢复记录只保留 24 小时。

@@ -106,16 +106,16 @@ describe("SFU duplex transport session", () => {
     nextChannelId = 0;
     channelRequests.length = 0;
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/new", () =>
+      http.post(`${window.location.origin}/v1/sfu/sessions/new`, () =>
         HttpResponse.json({ sessionId: `session-${++nextSession}` }),
       ),
-      http.post(/https:\/\/api\.file\.thanejoss\.com\/v1\/sfu\/sessions\/[^/]+\/datachannels\/establish/, () =>
+      http.post(`${window.location.origin}/v1/sfu/sessions/:sessionId/datachannels/establish`, () =>
         HttpResponse.json({
           sessionDescription: { type: "answer", sdp: "cloudflare-answer" },
           requiresImmediateRenegotiation: false,
         }),
       ),
-      http.post(/https:\/\/api\.file\.thanejoss\.com\/v1\/sfu\/sessions\/[^/]+\/datachannels\/new/, async ({ request }) => {
+      http.post(`${window.location.origin}/v1/sfu/sessions/:sessionId/datachannels/new`, async ({ request }) => {
         channelRequests.push(await request.json());
         return HttpResponse.json({ dataChannels: [{ id: ++nextChannelId }] });
       }),

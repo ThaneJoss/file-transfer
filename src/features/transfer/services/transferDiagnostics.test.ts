@@ -8,7 +8,7 @@ describe("transfer diagnostics", () => {
   it("reports only bounded capability and route metadata", async () => {
     let payload: Record<string, unknown> | null = null;
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/diagnostics/transfers", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/diagnostics/transfers`, async ({ request }) => {
         payload = await request.json() as Record<string, unknown>;
         return HttpResponse.json({ accepted: true }, { status: 202 });
       }),

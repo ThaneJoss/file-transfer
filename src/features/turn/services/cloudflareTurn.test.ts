@@ -6,7 +6,7 @@ import { generateCloudflareTurnIceServers, normalizeIceServers } from "./cloudfl
 
 describe("Cloudflare TURN service", () => {
   it("requests temporary TURN servers without exposing credentials in a URL", async () => {
-    server.use(http.post("https://api.file.thanejoss.com/v1/turn/credentials", async ({ request }) => {
+    server.use(http.post(`${window.location.origin}/v1/turn/credentials`, async ({ request }) => {
       expect(request.credentials).toBe("include");
       expect(await request.json()).toEqual({ ttlSeconds: 3600 });
       return HttpResponse.json({

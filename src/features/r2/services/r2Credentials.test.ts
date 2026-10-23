@@ -7,7 +7,7 @@ import { requestR2Credentials } from "./r2Credentials";
 describe("R2 temporary credentials", () => {
   it("requests a server-generated object key with a large-file-safe TTL", async () => {
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/r2/credentials", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/r2/credentials`, async ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(await request.json()).toEqual({ fileName: "测试.txt", ttlSeconds: 3600 });
         return HttpResponse.json({
