@@ -28,16 +28,13 @@ Deploy command: npx wrangler deploy
 Non-production branch deploy command: npx wrangler versions upload
 ```
 
-Build Variables:
-
-```txt
-PNPM_VERSION=11.15.1
-```
+依赖与 pnpm 版本由根目录 `package.json` 和 `pnpm-lock.yaml` 固定。
 
 Root Directory 保持默认仓库根目录，不需要手动填写。根目录 `wrangler.jsonc` 没有
-`assets` 配置，因此 Worker 部署只发布 API，不会接管 Vercel 前端。Cloudflare
-Workers Builds 自动注入 `WORKERS_CI=1`，因此同一个 `pnpm build` 会选择 Worker
-检查；Vercel 和本地默认选择前端构建。
+`assets` 配置，因此该 Worker 部署只发布 API。前端由同仓库的独立 `file-transfer` Worker
+通过 `wrangler.frontend.jsonc` 发布，生产域名仍为 `file.thanejoss.com`。Cloudflare
+Workers Builds 自动注入 `WORKERS_CI=1`，原 `pnpm build` 继续选择 API 检查；
+前端项目显式使用 `pnpm build:frontend`，本地 `pnpm build` 仍默认构建前端。
 
 ## 后端边界
 

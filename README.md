@@ -80,6 +80,8 @@ pnpm test:worker
 WORKERS_CI=1 pnpm build
 pnpm worker:types:check
 pnpm worker:dry-run
+pnpm build:frontend
+pnpm frontend:dry-run
 pnpm check:all
 ```
 
@@ -110,55 +112,54 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 
 生产构建会生成 Vite manifest 并执行 bundle budget：初始静态 JS 不超过 115 KiB gzip、最大单块不超过 95 KiB gzip、全部 JS 不超过 175 KiB gzip。首页、登录页、账户页、R2 签名器和哈希 Worker 分块加载；阈值可用对应的 `BUNDLE_MAX_*_KIB` 环境变量临时覆盖。
 
-## 独立部署
+## GitHub 自动部署到 Cloudflare
 
-前端和 API 位于同一个 GitHub 仓库并共用默认仓库根目录。Vercel 和 Cloudflare 都执行
-`pnpm build`：Cloudflare Workers Builds 会自动注入 `WORKERS_CI=1`，构建脚本据此只检查
-Worker；其他环境默认构建 Vite 前端。根目录 `wrangler.jsonc` 只指向
-`worker/src/index.ts`，且不配置 `assets`，因此 Worker 部署不会上传 `dist/`。
+前端和 API 都由 `ThaneJoss/file-transfer` 自动部署到 Cloudflare，生产分支为 `main`。
+本地仍使用 `pnpm dev`、`pnpm dev:worker` 和 `pnpm build`，无需改变开发方式。
 
-### Vercel 前端
+| 项目 | 前端 | API |
+| --- | --- | --- |
+| Worker | `file-transfer` | `file-transfer-api` |
+| 域名 | `https://file.thanejoss.com` | `https://api.file.thanejoss.com` |
+| Wrangler 配置 | `wrangler.frontend.jsonc` | `wrangler.jsonc` |
+| Build command | `pnpm run build:frontend` | `pnpm run build` |
+| Deploy command | `pnpm exec wrangler deploy --config wrangler.frontend.jsonc` | `npx wrangler deploy` |
+| 非生产分支 | `pnpm exec wrangler versions upload --config wrangler.frontend.jsonc` | `npx wrangler versions upload` |
 
-Vercel 保持默认仓库根目录，不需要设置 Root Directory 或 Ignored Build Step：
+两个 Workers Builds 项目都连接同一仓库，Root Directory 保持仓库根目录。
+推送 `main` 自动发布生产版本；其他分支自动上传预览版本。前端构建变量为
+`NODE_VERSION=24`、`PNPM_VERSION=11.15.1`，依赖版本由根目录锁文件固定。
+GitHub 继续使用现有共享 CI，并额外检查 Cloudflare 前端构建与发布 dry-run。
 
-```txt
-Install Command: pnpm install --frozen-lockfile
-Build Command: pnpm build
-Output Directory: dist
+Cloudflare 自动注入 `WORKERS_CI=1`。原 `pnpm build` 在这个环境下仍只检查 API；
+新 `pnpm build:frontend` 显式选择前端，确保生成 `dist/`，不会误走 API 构建。
+API 的原 Worker、Runtime Secrets、D1、Durable Object 和 R2 保持原有归属。
+前端为纯静态资源 Worker，不需要服务端密钥。
+
+手动发布或验证前端：
+
+```bash
+pnpm build:frontend
+pnpm frontend:dry-run
+pnpm deploy:frontend
+# 非生产预览，不替换生产版本：
+pnpm preview:frontend
 ```
 
-纯 Worker 提交仍可能触发一次 Vercel 构建，但该构建只执行前端命令，不会部署
-Cloudflare Worker。
+前端预览 URL 可检查界面，但生产 Passkey、API 和 R2 的 Origin 限制仍绑定
+`file.thanejoss.com`。完整登录与传输使用生产域名或已有本地开发环境；不要为预览放宽生产允许列表。
 
-### Cloudflare API Worker
+API 默认发布命令不自动应用 D1 migration。包含新 migration 的改动在生产发布前先运行
+`pnpm db:migrations:apply:remote`，或使用 `pnpm deploy:worker`。
 
-现有 `file-transfer-api` Worker 已从 `ThaneJoss/file-transfer` 的 `main` 分支
-成功构建发布。维护以下配置：
-
-```txt
-Production branch: main
-Build command: pnpm run build
-Deploy command: npx wrangler deploy
-Non-production branch deploy command: npx wrangler versions upload
-Build variable: PNPM_VERSION=11.15.1
-```
-
-Root Directory 保持 Cloudflare 默认值，不需要手动填写。根目录 `wrangler.jsonc`
-保留原 Worker 名称、自定义域名、D1 数据库 ID、Durable Object migration 和全部
-Secret 名称。默认 `npx wrangler deploy` 不会自动执行 D1 migration；包含新 migration
-的改动应在生产发布前先运行 `pnpm db:migrations:apply:remote`。配置中刻意没有
-`assets`，因此不会部署前端。应直接修改现有 `file-transfer-api` Worker
-项目的 Git 连接，这样 Runtime Secrets、D1 与 Durable Object 都继续留在原项目中；不要
-另建一个同名替代 Worker。
-
-`ThaneJoss/file-transfer` 是前端与 API 的唯一维护仓库。旧 `file-transfer-api`
-GitHub 仓库已进入弃用收尾，不再承接开发或部署；同名 Cloudflare Worker 继续服务。
-部署证据、资源核对和剩余平台操作见 [迁移收尾记录](docs/deployment-migration.md)。
+`ThaneJoss/file-transfer` 是唯一维护仓库；旧 `file-transfer-api` GitHub 仓库仅保留历史。
+Vercel 配置保留用于回滚参考，生产域名由 Cloudflare 托管。
+资源核对、部署证据和回滚方法见 [迁移记录](docs/deployment-migration.md)。
 
 ## 部署注意事项
 
 - 涉及前后端协议的联合改动，先部署 API 与所需 D1 migration，再部署前端。
 - R2 CORS 必须允许站点 Origin、`GET` / `PUT` / `POST` / `DELETE`、签名请求头，并暴露 `ETag`、`Content-Length` 和 `Content-Type`；仓库中的 `worker/config/r2-cors.json` 是对应配置。
-- 前端为所有页面设置 CSP、HSTS、COOP、CORP、Permissions Policy、Referrer Policy、`nosniff` 和防嵌入响应头；若更换 API 或 R2 域名，需要同步更新 `vercel.json` 的 `connect-src`。
+- 前端为所有页面设置 CSP、HSTS、COOP、CORP、Permissions Policy、Referrer Policy、`nosniff` 和防嵌入响应头；若更换 API 或 R2 域名，需要同步更新 `public/_headers` 的 `connect-src`。
 - `/assets/*` 使用内容哈希和长期不可变缓存，其他路径回退到 `index.html`。模块脚本保留 `data-cfasync="false"`，避免 Cloudflare Rocket Loader 改写启动脚本。
 - 临时对象和未完成 multipart 的最终清理由对象存储生命周期规则负责；前端恢复记录只保留 24 小时。
