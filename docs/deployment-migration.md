@@ -16,9 +16,9 @@
 | 唯一部署配置 | 根目录 `wrangler.jsonc`，包含 API 入口与前端 assets |
 | Build command | `pnpm run build` |
 | Deploy command | `npx wrangler deploy` |
-| 分支预览发布 | `npx wrangler versions upload` |
+| 分支版本上传 | `npx wrangler versions upload` |
 | 生产触发器 | `42d8567f-6fe4-4e2f-8c90-b4edfde3d1f0` |
-| 预览触发器 | `28da0b41-eb13-4940-8b4e-43d8d4228d00` |
+| 分支版本上传触发器 | `28da0b41-eb13-4940-8b4e-43d8d4228d00` |
 | D1 | `file-transfer-api-db`，ID `82649145-9ce8-4c7a-9457-4ba0db3a97cf` |
 | Durable Object | `PICKUP_SESSIONS` / `PickupSession`，namespace `84464ad3a1f047d098f714099aa438ac` |
 | 主站和默认 API | `https://file.thanejoss.com` |
@@ -32,12 +32,12 @@
 
 待整合版验证完成后，移除原静态 Worker 身份
 `52bccc12b7d44e6ead68cc4386eb21f4` 及其独立前端触发器。
-保留的生产/预览触发器绑定原 API 的稳定 Worker ID，构建、配置名称和部署命令应与
+保留的生产发布和分支版本上传触发器绑定原 API 的稳定 Worker ID，构建、配置名称和部署命令应与
 改名后的单 Worker 一致。不要删除保留的 API 内部身份来实现改名：删除会影响其实现的
 Durable Object namespace。
 
 旧 API 域名作为同一 Worker 的别名保留，用于旧客户端和已有 Cloudflare Access
-保护的 `/admin/*`。公开站点及预览主机的 `/admin`、`/admin/*` 返回 404，避免管理员
+保护的 `/admin/*`。公开站点和其他非管理主机的 `/admin`、`/admin/*` 返回 404，避免管理员
 接口通过新的域名绕过 Access。
 
 Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
@@ -51,9 +51,12 @@ Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
 - `.env.local` 中 `VITE_API_BASE_URL` 是可选覆盖项，默认不需要设置。
 - `pnpm build` 构建整个应用，不再根据 `WORKERS_CI` 切换为 API-only 构建。
 - `pnpm run deploy` 构建应用、应用远程 D1 migration、发布单个 Worker；`pnpm deploy:worker` 是兼容入口。
-- `pnpm preview:worker` 构建应用并上传预览版本，不更改生产流量。
+- `pnpm preview:worker` 构建应用并上传候选版本，不更改生产流量。
 
-推送 `main` 触发一次生产应用发布，其他分支触发预览。
+推送 `main` 触发一次生产应用发布，其他分支自动构建并上传候选版本。
+当前 Worker 绑定 Durable Objects，legacy `wrangler versions upload` 不生成在线预览
+链接；实测上传版本为 `has_preview: false`。`preview:worker` 保留原命令名，仅代表
+候选版本上传；完整应用可通过 `pnpm dev:worker`（本地 `wrangler dev`）验证。
 平台默认命令 `npx wrangler deploy` 不自动应用 D1 migration；新增 migration 时先执行
 `pnpm db:migrations:apply:remote`。前后端属于同一个版本，数据库变更仍需保持兼容。
 

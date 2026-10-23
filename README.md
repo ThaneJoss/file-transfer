@@ -131,12 +131,16 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 | Worker / Wrangler 配置 | `file-transfer` / `wrangler.jsonc` |
 | Build command | `pnpm run build` |
 | Deploy command | `npx wrangler deploy` |
-| 非生产分支发布 | `npx wrangler versions upload` |
+| 非生产分支版本上传 | `npx wrangler versions upload` |
 | Root Directory | 仓库根目录 |
 
-推送 `main` 自动构建并发布整个应用；其他分支上传同一个应用的预览版本。
+推送 `main` 自动构建并发布整个应用；其他分支自动构建并上传候选版本，不切换生产流量。
 `pnpm build` 同时构建前端并检查 Worker，Cloudflare 注入的 `WORKERS_CI=1`
-不会改变构建目标。仓库只维护一份 Wrangler 配置和一套生产/预览触发器。
+不会改变构建目标。仓库只维护一份 Wrangler 配置，以及生产发布和分支版本上传触发器。
+
+当前 Worker 绑定 Durable Objects，legacy `wrangler versions upload` 不生成在线预览
+链接（实测版本 `has_preview: false`）。可用 `pnpm dev:worker` 启动本地 Wrangler
+验证完整应用；分支上传成功仅表示候选版本已保存。
 
 手动发布或验证：
 
@@ -144,7 +148,7 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 pnpm build
 pnpm worker:dry-run
 pnpm run deploy
-# 上传预览版本，不替换生产版本：
+# 上传候选版本，不替换生产版本，也不生成在线预览链接：
 pnpm preview:worker
 ```
 
@@ -156,12 +160,12 @@ Cloudflare 的默认 `npx wrangler deploy` 不自动执行 D1 migration，含新
 原 `file-transfer-api` Worker 通过原地改名保留内部身份、Runtime Secrets 和
 Durable Object namespace，D1 与 R2 沿用原资源。旧地址 `api.file.thanejoss.com`
 作为同一个 Worker 的兼容域名保留，供旧客户端和受 Cloudflare Access 保护的管理页使用。
-公开站点及预览域名不开放 `/admin` 和 `/admin/*`。
+公开站点和其他非管理主机不开放 `/admin` 和 `/admin/*`。
 
 Passkey 的 RP ID 仍为 `file.thanejoss.com`，已有 Passkey 可继续使用。
 浏览器会话 Cookie 从旧 API 主机改为站点主机后，现有用户可能需要重新登录一次。
-预览域名可检查页面和接口路由，但完整 Passkey 登录与传输使用生产域名或本地开发环境；
-生产 Origin 允许列表不为随机预览域名放宽。
+完整 Passkey 登录与传输使用生产域名或本地开发环境；生产 Origin 允许列表不为
+其他测试域名放宽。
 
 `ThaneJoss/file-transfer` 是唯一维护仓库；旧 API GitHub 仓库仅保留历史。
 资源、平台设置和回滚说明见 [迁移记录](docs/deployment-migration.md)。

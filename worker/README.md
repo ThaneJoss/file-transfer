@@ -34,7 +34,7 @@ Non-production branch deploy command: npx wrangler versions upload
 
 Root Directory 保持仓库根目录。`wrangler.jsonc` 同时声明 API 入口和 `dist/`
 静态资源。`pnpm build` 构建前端并检查 Worker，即使设置 `WORKERS_CI=1` 也执行相同流程。
-生产与预览各有一个 GitHub 构建触发器，不再分别发布前端和 API。
+生产发布与分支版本上传各有一个 GitHub 构建触发器，不再分别发布前端和 API。
 
 ```sh
 pnpm build
@@ -44,7 +44,10 @@ pnpm preview:worker
 ```
 
 `pnpm run deploy` 包含构建、远程 D1 migration 和发布，`pnpm deploy:worker` 是兼容入口。
-`pnpm preview:worker` 构建后上传预览版本，不切换生产流量。
+`pnpm preview:worker` 构建后上传候选版本，不切换生产流量。
+当前 Worker 绑定 Durable Objects，legacy `wrangler versions upload` 不生成在线预览
+链接（实测版本 `has_preview: false`）。分支会自动构建并上传候选版本；完整应用可通过
+`pnpm dev:worker` 启动本地 Wrangler 验证。
 Cloudflare 默认发布命令仍为 `npx wrangler deploy`，不会替代新增数据库 migration 的前置执行。
 
 单 Worker 通过保留原 API 的内部 ID 并原地改名实现；原 Runtime Secrets、D1 和
@@ -314,7 +317,7 @@ await fetch("/v1/turn/credentials", {
 `https://api.file.thanejoss.com/admin/` 提供按类别、用户和时间聚合的统计，以及
 逐用户、逐计费项的额度调整。该路径没有应用层鉴权，必须由 Cloudflare Zero Trust
 Access 策略保护；`/admin/api/*` 同样依赖该策略。
-Worker 对公开站点 `file.thanejoss.com` 和所有预览主机上的 `/admin`、`/admin/*`
+Worker 对公开站点 `file.thanejoss.com` 和其他非管理主机上的 `/admin`、`/admin/*`
 返回 404，避免通过新主机绕过既有 Access 保护。本地开发例外仅在请求主机与
 `APP_ORIGIN` 都为 localhost/loopback 时启用。
 
