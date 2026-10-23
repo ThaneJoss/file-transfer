@@ -49,15 +49,16 @@ app.use("*", async (c, next) => {
   }
 });
 
-// The legacy admin hostname is protected by Cloudflare Access. Do not expose
-// those unauthenticated application routes through the public app or previews.
+// Cloudflare Access protects /admin on APP_ORIGIN. Keep these application routes
+// unavailable through other Worker hostnames, including preview URLs.
 app.use("*", async (c, next) => {
   if (c.req.path === "/admin" || c.req.path.startsWith("/admin/")) {
     const hostname = new URL(c.req.url).hostname;
+    const appHostname = new URL(c.env.APP_ORIGIN).hostname;
     const localHostnames = new Set(["localhost", "127.0.0.1", "[::1]"]);
     const localDevelopment = localHostnames.has(hostname) &&
-      localHostnames.has(new URL(c.env.APP_ORIGIN).hostname);
-    if (hostname !== "api.file.thanejoss.com" && !localDevelopment) {
+      localHostnames.has(appHostname);
+    if (hostname !== appHostname && !localDevelopment) {
       return c.json({ error: "Not found" }, 404);
     }
   }

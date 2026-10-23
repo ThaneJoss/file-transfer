@@ -7,7 +7,7 @@
 
 ```txt
 生产站点/API: https://file.thanejoss.com
-兼容 API:     https://api.file.thanejoss.com
+管理页:       https://file.thanejoss.com/admin/
 GitHub 仓库:  https://github.com/ThaneJoss/file-transfer
 Worker:      file-transfer
 D1:          file-transfer-api-db
@@ -51,8 +51,8 @@ pnpm preview:worker
 Cloudflare 默认发布命令仍为 `npx wrangler deploy`，不会替代新增数据库 migration 的前置执行。
 
 单 Worker 通过保留原 API 的内部 ID 并原地改名实现；原 Runtime Secrets、D1 和
-PickupSession namespace 保留。`api.file.thanejoss.com` 是同一 Worker 的兼容域名，
-不是另一个 Worker。
+PickupSession namespace 保留。网页、API 与管理页统一使用 `file.thanejoss.com`，
+旧 API 域名已撤除。
 
 ## 后端边界
 
@@ -180,7 +180,7 @@ WebAuthn RP 必须是前端站点，不能是 API 域名：
 Worker 从 `APP_ORIGIN` 的 hostname 得到 RP ID。生产站点和 API 都位于
 `https://file.thanejoss.com`，Better Auth 路径仍为 `/api/auth/*`。
 原 Passkey 的 RP ID 没有变化，凭证继续有效；Cookie 主机切换后，现有浏览器会话可能需要
-重新登录一次。旧 `api.file.thanejoss.com` 仍由同一 Worker 接收兼容请求。
+重新登录一次。
 
 首次注册先获取服务端注册上下文：
 
@@ -226,8 +226,6 @@ await authClient.signIn.passkey();
 
 ```sh
 curl https://file.thanejoss.com/health
-# 同一个 Worker 的旧地址：
-curl https://api.file.thanejoss.com/health
 ```
 
 期望：
@@ -314,11 +312,12 @@ await fetch("/v1/turn/credentials", {
 
 ## 管理页
 
-`https://api.file.thanejoss.com/admin/` 提供按类别、用户和时间聚合的统计，以及
+`https://file.thanejoss.com/admin/` 提供按类别、用户和时间聚合的统计，以及
 逐用户、逐计费项的额度调整。该路径没有应用层鉴权，必须由 Cloudflare Zero Trust
-Access 策略保护；`/admin/api/*` 同样依赖该策略。
-Worker 对公开站点 `file.thanejoss.com` 和其他非管理主机上的 `/admin`、`/admin/*`
-返回 404，避免通过新主机绕过既有 Access 保护。本地开发例外仅在请求主机与
+Access 策略保护。原管理员策略用于主域名的 `/admin` 和 `/admin/*`，包含 `/admin/api/*`，
+其余站点页面和普通 API 不要求 Access 登录。
+Worker 对其他主机上的 `/admin`、`/admin/*` 返回 404，避免绕过 Access 保护。
+本地开发例外仅在请求主机与
 `APP_ORIGIN` 都为 localhost/loopback 时启用。
 
 TURN 请求体：
