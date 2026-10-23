@@ -143,12 +143,12 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 ```bash
 pnpm build
 pnpm worker:dry-run
-pnpm deploy
+pnpm run deploy
 # 上传预览版本，不替换生产版本：
 pnpm preview:worker
 ```
 
-`pnpm deploy` 依次构建应用、执行待处理的 D1 migration、发布 Worker；
+`pnpm run deploy` 依次构建应用、执行待处理的 D1 migration、发布 Worker；
 旧命令 `pnpm deploy:worker` 保留为它的兼容入口。
 Cloudflare 的默认 `npx wrangler deploy` 不自动执行 D1 migration，含新 migration
 的提交仍需在生产发布前运行 `pnpm db:migrations:apply:remote`。

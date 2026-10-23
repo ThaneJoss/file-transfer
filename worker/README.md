@@ -39,11 +39,11 @@ Root Directory 保持仓库根目录。`wrangler.jsonc` 同时声明 API 入口�
 ```sh
 pnpm build
 pnpm worker:dry-run
-pnpm deploy
+pnpm run deploy
 pnpm preview:worker
 ```
 
-`pnpm deploy` 包含构建、远程 D1 migration 和发布，`pnpm deploy:worker` 是兼容入口。
+`pnpm run deploy` 包含构建、远程 D1 migration 和发布，`pnpm deploy:worker` 是兼容入口。
 `pnpm preview:worker` 构建后上传预览版本，不切换生产流量。
 Cloudflare 默认发布命令仍为 `npx wrangler deploy`，不会替代新增数据库 migration 的前置执行。
 
@@ -131,7 +131,7 @@ pnpm db:migrations:list:remote
 ```
 
 Passkey 使用的 migration 是 `migrations/0003_passkey_auth.sql`，其中包含 Better
-Auth 的 `passkey` 表和一次性注册上下文表。`pnpm deploy` 先构建应用，再应用所有待执行的远程
+Auth 的 `passkey` 表和一次性注册上下文表。`pnpm run deploy` 先构建应用，再应用所有待执行的远程
 D1 migration，最后发布整个 Worker，避免代码先于数据库结构上线。也可以在部署前单独执行：
 
 ```sh

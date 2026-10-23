@@ -28,7 +28,7 @@
     "worker:types": "wrangler types worker/worker-configuration.d.ts --include-runtime=false",
     "worker:types:check": "wrangler types worker/worker-configuration.d.ts --include-runtime=false --check",
     "worker:dry-run": "wrangler deploy --dry-run",
-    "deploy:worker": "pnpm deploy",
+    "deploy:worker": "pnpm run deploy",
     "r2:cors:apply": "wrangler r2 bucket cors set \"$R2_BUCKET\" --file worker/config/r2-cors.json --force",
     "r2:cors:list": "wrangler r2 bucket cors list \"$R2_BUCKET\"",
     "db:generate": "drizzle-kit generate",

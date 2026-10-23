@@ -50,7 +50,7 @@ Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
 - `pnpm dev:worker` 先构建前端资源，再启动 Wrangler；`.dev.vars` 保存本地服务端配置。
 - `.env.local` 中 `VITE_API_BASE_URL` 是可选覆盖项，默认不需要设置。
 - `pnpm build` 构建整个应用，不再根据 `WORKERS_CI` 切换为 API-only 构建。
-- `pnpm deploy` 构建应用、应用远程 D1 migration、发布单个 Worker；`pnpm deploy:worker` 是兼容入口。
+- `pnpm run deploy` 构建应用、应用远程 D1 migration、发布单个 Worker；`pnpm deploy:worker` 是兼容入口。
 - `pnpm preview:worker` 构建应用并上传预览版本，不更改生产流量。
 
 推送 `main` 触发一次生产应用发布，其他分支触发预览。
