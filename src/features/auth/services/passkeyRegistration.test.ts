@@ -7,7 +7,7 @@ import { createPasskeyRegistrationContext } from "./passkeyRegistration";
 describe("Passkey registration context", () => {
   it("requests a signed registration context with session cookies", async () => {
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/passkey/registration-context", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/passkey/registration-context`, async ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(await request.json()).toEqual({ name: "测试用户" });
         return HttpResponse.json({ context: "signed-context" }, { status: 201 });
@@ -19,7 +19,7 @@ describe("Passkey registration context", () => {
 
   it("rejects an empty registration context", async () => {
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/passkey/registration-context", () =>
+      http.post(`${window.location.origin}/v1/passkey/registration-context`, () =>
         HttpResponse.json({ context: " " }, { status: 201 }),
       ),
     );

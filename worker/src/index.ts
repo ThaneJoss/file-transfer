@@ -49,6 +49,21 @@ app.use("*", async (c, next) => {
   }
 });
 
+// The legacy admin hostname is protected by Cloudflare Access. Do not expose
+// those unauthenticated application routes through the public app or previews.
+app.use("*", async (c, next) => {
+  if (c.req.path === "/admin" || c.req.path.startsWith("/admin/")) {
+    const hostname = new URL(c.req.url).hostname;
+    const localHostnames = new Set(["localhost", "127.0.0.1", "[::1]"]);
+    const localDevelopment = localHostnames.has(hostname) &&
+      localHostnames.has(new URL(c.env.APP_ORIGIN).hostname);
+    if (hostname !== "api.file.thanejoss.com" && !localDevelopment) {
+      return c.json({ error: "Not found" }, 404);
+    }
+  }
+  await next();
+});
+
 function allowedOrigins(env: Bindings) {
   return [
     env.BETTER_AUTH_URL,

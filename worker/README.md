@@ -1,19 +1,21 @@
-# File Transfer API Worker
+# File Transfer Worker
 
-`file-transfer` 单仓库中的 Cloudflare Worker API。本目录由原
-`ThaneJoss/file-transfer-api` 仓库迁入，保留源码、测试和 D1 migration。依赖、锁文件、
-Drizzle 配置和 Wrangler 配置位于仓库根目录；以下命令都在仓库根目录执行。
+`file-transfer` 是同时提供网页与 API 的单个 Cloudflare Worker。本目录保存服务端源码、
+测试和 D1 migration，来自原 `ThaneJoss/file-transfer-api` 仓库。前端位于 `src/`，
+依赖、锁文件、Drizzle 配置和唯一的 Wrangler 配置均位于仓库根目录。
+以下命令都在仓库根目录执行。
 
 ```txt
-生产 API:     https://api.file.thanejoss.com
+生产站点/API: https://file.thanejoss.com
+兼容 API:     https://api.file.thanejoss.com
 GitHub 仓库:  https://github.com/ThaneJoss/file-transfer
-Worker:      file-transfer-api
+Worker:      file-transfer
 D1:          file-transfer-api-db
 ```
 
 ## 技术栈
 
-Hono + Better Auth 1.6.19 + `@better-auth/passkey` 1.6.19 + Cloudflare D1 +
+Hono + Better Auth 1.6.25 + `@better-auth/passkey` 1.6.25 + Cloudflare D1 +
 Durable Objects + Worker Secrets。鉴权只启用 Passkey，不提供 email/password 注册或登录。
 
 ## Cloudflare 部署
@@ -30,15 +32,28 @@ Non-production branch deploy command: npx wrangler versions upload
 
 依赖与 pnpm 版本由根目录 `package.json` 和 `pnpm-lock.yaml` 固定。
 
-Root Directory 保持默认仓库根目录，不需要手动填写。根目录 `wrangler.jsonc` 没有
-`assets` 配置，因此该 Worker 部署只发布 API。前端由同仓库的独立 `file-transfer` Worker
-通过 `wrangler.frontend.jsonc` 发布，生产域名仍为 `file.thanejoss.com`。Cloudflare
-Workers Builds 自动注入 `WORKERS_CI=1`，原 `pnpm build` 继续选择 API 检查；
-前端项目显式使用 `pnpm build:frontend`，本地 `pnpm build` 仍默认构建前端。
+Root Directory 保持仓库根目录。`wrangler.jsonc` 同时声明 API 入口和 `dist/`
+静态资源。`pnpm build` 构建前端并检查 Worker，即使设置 `WORKERS_CI=1` 也执行相同流程。
+生产与预览各有一个 GitHub 构建触发器，不再分别发布前端和 API。
+
+```sh
+pnpm build
+pnpm worker:dry-run
+pnpm deploy
+pnpm preview:worker
+```
+
+`pnpm deploy` 包含构建、远程 D1 migration 和发布，`pnpm deploy:worker` 是兼容入口。
+`pnpm preview:worker` 构建后上传预览版本，不切换生产流量。
+Cloudflare 默认发布命令仍为 `npx wrangler deploy`，不会替代新增数据库 migration 的前置执行。
+
+单 Worker 通过保留原 API 的内部 ID 并原地改名实现；原 Runtime Secrets、D1 和
+PickupSession namespace 保留。`api.file.thanejoss.com` 是同一 Worker 的兼容域名，
+不是另一个 Worker。
 
 ## 后端边界
 
-Worker 只负责：
+除前端静态资源外，服务端负责：
 
 1. Better Auth Passkey 注册、登录和 session 校验。
 2. 托管 TURN、R2、SFU 长期密钥，向已登录发送方或绑定单个取件码的访客接收方提供短期、受限访问。
@@ -59,16 +74,16 @@ Worker 只代理文件传输需要的控制面接口，长期 App Token 不离�
 ## 运行时密钥
 
 ```sh
-openssl rand -base64 32 | pnpm wrangler secret put BETTER_AUTH_SECRET --name file-transfer-api
-pnpm wrangler secret put TURN_KEY_ID --name file-transfer-api
-pnpm wrangler secret put TURN_KEY_API_TOKEN --name file-transfer-api
-pnpm wrangler secret put R2_ACCOUNT_ID --name file-transfer-api
-pnpm wrangler secret put R2_BUCKET --name file-transfer-api
-pnpm wrangler secret put R2_PARENT_API_TOKEN --name file-transfer-api
-pnpm wrangler secret put R2_PARENT_ACCESS_KEY_ID --name file-transfer-api
-pnpm wrangler secret put SFU_APP_ID --name file-transfer-api
-pnpm wrangler secret put SFU_APP_TOKEN --name file-transfer-api
-pnpm wrangler secret list --name file-transfer-api
+openssl rand -base64 32 | pnpm wrangler secret put BETTER_AUTH_SECRET --name file-transfer
+pnpm wrangler secret put TURN_KEY_ID --name file-transfer
+pnpm wrangler secret put TURN_KEY_API_TOKEN --name file-transfer
+pnpm wrangler secret put R2_ACCOUNT_ID --name file-transfer
+pnpm wrangler secret put R2_BUCKET --name file-transfer
+pnpm wrangler secret put R2_PARENT_API_TOKEN --name file-transfer
+pnpm wrangler secret put R2_PARENT_ACCESS_KEY_ID --name file-transfer
+pnpm wrangler secret put SFU_APP_ID --name file-transfer
+pnpm wrangler secret put SFU_APP_TOKEN --name file-transfer
+pnpm wrangler secret list --name file-transfer
 ```
 
 `R2_PARENT_ACCESS_KEY_ID` 使用 R2 token 的 Access Key ID。`R2_PARENT_API_TOKEN`
@@ -116,8 +131,8 @@ pnpm db:migrations:list:remote
 ```
 
 Passkey 使用的 migration 是 `migrations/0003_passkey_auth.sql`，其中包含 Better
-Auth 的 `passkey` 表和一次性注册上下文表。`pnpm deploy:worker` 会先应用所有待执行的远程
-D1 migration，再发布 Worker，避免代码先于数据库结构上线。也可以在部署前单独执行：
+Auth 的 `passkey` 表和一次性注册上下文表。`pnpm deploy` 先构建应用，再应用所有待执行的远程
+D1 migration，最后发布整个 Worker，避免代码先于数据库结构上线。也可以在部署前单独执行：
 
 ```sh
 pnpm db:migrations:apply:remote
@@ -131,9 +146,12 @@ pnpm db:migrations:apply:remote
 本地开发：
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
+cp .dev.vars.example .dev.vars
 pnpm db:migrations:apply:local
 pnpm dev:worker
+# 另开终端，启动 Vite 热更新及同源 API 代理：
+pnpm dev
 ```
 
 本地 `.dev.vars`：
@@ -156,8 +174,10 @@ WebAuthn RP 必须是前端站点，不能是 API 域名：
 | 生产 | `https://file.thanejoss.com` | `file.thanejoss.com` |
 | 本地 | `http://localhost:5173` | `localhost` |
 
-Worker 从 `APP_ORIGIN` 的 hostname 得到 RP ID。生产 API 仍为
-`https://api.file.thanejoss.com`，Better Auth 路径仍为 `/api/auth/*`。
+Worker 从 `APP_ORIGIN` 的 hostname 得到 RP ID。生产站点和 API 都位于
+`https://file.thanejoss.com`，Better Auth 路径仍为 `/api/auth/*`。
+原 Passkey 的 RP ID 没有变化，凭证继续有效；Cookie 主机切换后，现有浏览器会话可能需要
+重新登录一次。旧 `api.file.thanejoss.com` 仍由同一 Worker 接收兼容请求。
 
 首次注册先获取服务端注册上下文：
 
@@ -183,7 +203,7 @@ Content-Type: application/json
 
 ```ts
 const { context } = await fetch(
-  "https://api.file.thanejoss.com/v1/passkey/registration-context",
+  "/v1/passkey/registration-context",
   {
     method: "POST",
     credentials: "include",
@@ -196,12 +216,14 @@ await authClient.passkey.addPasskey({ name, context });
 await authClient.signIn.passkey();
 ```
 
-注册和登录成功后，服务端都会自动设置 Better Auth session cookie；之后跨域访问
-`/v1/*` 仍需使用 `credentials: "include"`。
+注册和登录成功后，服务端自动设置站点的 Better Auth session cookie；前端默认同源访问
+`/v1/*`，保留 `credentials: "include"` 以兼容显式 API 地址覆盖。
 
 ## 验证
 
 ```sh
+curl https://file.thanejoss.com/health
+# 同一个 Worker 的旧地址：
 curl https://api.file.thanejoss.com/health
 ```
 
@@ -213,7 +235,7 @@ curl https://api.file.thanejoss.com/health
 
 ## API
 
-- `GET /`
+- `GET /`，前端页面
 - `GET /health`
 - `GET|POST /api/auth/*`
 - `POST /v1/passkey/registration-context`，公开，仅签发短期一次性注册上下文
@@ -250,10 +272,10 @@ status，写入 Answer、winner、cancel，以及调用接收端所需的 TURN�
 创建取件码、读取发送方 Answer/winner、访问用量或申请 R2 上传凭据。兑换接口按客户端
 地址每分钟最多 12 次尝试，只保存由服务端 secret 加盐的地址哈希，并定期清理旧 bucket。
 
-浏览器跨域调用必须携带 cookie：
+前端默认同源调用，显式覆盖 API 地址时也会携带 cookie：
 
 ```ts
-await fetch("https://api.file.thanejoss.com/v1/turn/credentials", {
+await fetch("/v1/turn/credentials", {
   method: "POST",
   credentials: "include",
   headers: { "Content-Type": "application/json" },
@@ -292,6 +314,9 @@ await fetch("https://api.file.thanejoss.com/v1/turn/credentials", {
 `https://api.file.thanejoss.com/admin/` 提供按类别、用户和时间聚合的统计，以及
 逐用户、逐计费项的额度调整。该路径没有应用层鉴权，必须由 Cloudflare Zero Trust
 Access 策略保护；`/admin/api/*` 同样依赖该策略。
+Worker 对公开站点 `file.thanejoss.com` 和所有预览主机上的 `/admin`、`/admin/*`
+返回 404，避免通过新主机绕过既有 Access 保护。本地开发例外仅在请求主机与
+`APP_ORIGIN` 都为 localhost/loopback 时启用。
 
 TURN 请求体：
 

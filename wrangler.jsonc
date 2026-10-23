@@ -1,12 +1,18 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "file-transfer-api",
+  "name": "file-transfer",
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-06-19",
-  "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
   "preview_urls": true,
   "routes": [
+    {
+      "pattern": "file.thanejoss.com",
+      "custom_domain": true
+    },
     {
       "pattern": "api.file.thanejoss.com",
       "custom_domain": true
@@ -16,7 +22,7 @@
     "enabled": true
   },
   "vars": {
-    "BETTER_AUTH_URL": "https://api.file.thanejoss.com",
+    "BETTER_AUTH_URL": "https://file.thanejoss.com",
     "APP_ORIGIN": "https://file.thanejoss.com"
   },
   "secrets": {
@@ -51,7 +57,22 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["PickupSession"]
+      "new_sqlite_classes": [
+        "PickupSession"
+      ]
     }
-  ]
+  ],
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api",
+      "/api/*",
+      "/v1",
+      "/v1/*",
+      "/health",
+      "/admin",
+      "/admin/*"
+    ]
+  }
 }

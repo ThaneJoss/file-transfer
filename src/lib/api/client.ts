@@ -1,4 +1,4 @@
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "https://api.file.thanejoss.com").replace(/\/+$/, "");
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || window.location.origin).replace(/\/+$/, "");
 
 export const API_UNAUTHORIZED_EVENT = "file-transfer:api-unauthorized";
 export const API_USAGE_CHANGED_EVENT = "file-transfer:api-usage-changed";

@@ -9,12 +9,11 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "dev:worker": "wrangler dev",
+    "dev:worker": "pnpm build:frontend && wrangler dev",
     "build": "node scripts/build-target.mjs",
     "build:frontend": "node scripts/build-target.mjs frontend",
     "preview": "vite preview --host 0.0.0.0",
-    "preview:frontend": "pnpm build:frontend && wrangler versions upload --config wrangler.frontend.jsonc",
-    "preview:worker": "wrangler versions upload",
+    "preview:worker": "pnpm build && wrangler versions upload",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b && tsc --noEmit -p tsconfig.test.json",
     "check:worker": "tsc --noEmit -p worker/tsconfig.json",
@@ -29,9 +28,7 @@
     "worker:types": "wrangler types worker/worker-configuration.d.ts --include-runtime=false",
     "worker:types:check": "wrangler types worker/worker-configuration.d.ts --include-runtime=false --check",
     "worker:dry-run": "wrangler deploy --dry-run",
-    "frontend:dry-run": "wrangler deploy --config wrangler.frontend.jsonc --dry-run",
-    "deploy:frontend": "pnpm build:frontend && wrangler deploy --config wrangler.frontend.jsonc",
-    "deploy:worker": "pnpm db:migrations:apply:remote && wrangler deploy",
+    "deploy:worker": "pnpm deploy",
     "r2:cors:apply": "wrangler r2 bucket cors set \"$R2_BUCKET\" --file worker/config/r2-cors.json --force",
     "r2:cors:list": "wrangler r2 bucket cors list \"$R2_BUCKET\"",
     "db:generate": "drizzle-kit generate",
@@ -40,7 +37,8 @@
     "db:migrations:apply:local": "wrangler d1 migrations apply file-transfer-api-db --local",
     "db:migrations:apply:remote": "wrangler d1 migrations apply file-transfer-api-db --remote",
     "check": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:e2e && pnpm build",
-    "check:all": "pnpm check && pnpm frontend:dry-run && WORKERS_CI=1 pnpm build && pnpm check:worker && pnpm test:worker && pnpm worker:types:check && pnpm worker:dry-run"
+    "check:all": "pnpm check && pnpm test:worker && pnpm worker:types:check && pnpm worker:dry-run",
+    "deploy": "pnpm build && pnpm db:migrations:apply:remote && wrangler deploy"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.6.25",

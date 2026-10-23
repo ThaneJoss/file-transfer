@@ -13,7 +13,7 @@ describe("Cloudflare Calls API client", () => {
   it("uses the authenticated backend proxy without exposing an API token", async () => {
     const peerConnection = {} as RTCPeerConnection;
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/new", ({ request }) => {
+      http.post(`${window.location.origin}/v1/sfu/sessions/new`, ({ request }) => {
         expect(request.credentials).toBe("include");
         expect(request.headers.get("authorization")).toBeNull();
         expect(request.headers.get("content-type")).toBe("application/json");
@@ -39,7 +39,7 @@ describe("Cloudflare Calls API client", () => {
     const session = { id: "subscriber-1", peerConnection };
 
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/subscriber-1/datachannels/new", async ({ request }) => {
+      http.post(`${window.location.origin}/v1/sfu/sessions/subscriber-1/datachannels/new`, async ({ request }) => {
         requests.push(await request.json());
         return HttpResponse.json({ dataChannels: [{ id: 19 }] });
       }),
@@ -71,7 +71,7 @@ describe("Cloudflare Calls API client", () => {
 
   it("preserves cancellation as AbortError", async () => {
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/new", async () => {
+      http.post(`${window.location.origin}/v1/sfu/sessions/new`, async () => {
         await delay("infinite");
         return HttpResponse.json({ sessionId: "too-late" });
       }),
@@ -88,7 +88,7 @@ describe("Cloudflare Calls API client", () => {
 
   it("reports a bounded request timeout", async () => {
     server.use(
-      http.post("https://api.file.thanejoss.com/v1/sfu/sessions/new", async () => {
+      http.post(`${window.location.origin}/v1/sfu/sessions/new`, async () => {
         await delay(50);
         return HttpResponse.json({ sessionId: "too-late" });
       }),

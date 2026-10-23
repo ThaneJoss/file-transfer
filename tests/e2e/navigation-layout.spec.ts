@@ -1,6 +1,7 @@
 import { expect, test } from "./support/test";
 
 import {
+  apiBaseUrl,
   collectConsoleErrors,
   expectNoConsoleErrors,
   expectNoHorizontalOverflow,
@@ -132,7 +133,7 @@ test("fits the logged-out homepage on a scaled 1080p Windows display", async ({ 
   await page.setViewportSize({ width: 1536, height: 690 });
   const consoleErrors = collectConsoleErrors(page);
   await installAppMocks(page, { signedIn: false });
-  await page.route("https://api.file.thanejoss.com/api/auth/get-session", (route) => route.abort("failed"));
+  await page.route(`${apiBaseUrl}/api/auth/get-session`, (route) => route.abort("failed"));
   await page.goto("/");
 
   const homepage = page.getByTestId("unified-transfer-page");

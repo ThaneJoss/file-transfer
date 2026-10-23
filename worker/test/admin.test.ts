@@ -2,12 +2,31 @@ import { describe, expect, it } from "vitest";
 import type { UsageSummaryResponse } from "../src/usage";
 import { bindings, registerUser, request } from "./support";
 
+function adminRequest(path: string, init: RequestInit = {}) {
+  return request(path, init, undefined, "https://api.file.thanejoss.com");
+}
+
 describe("admin page and API", () => {
-  it("serves the admin page without application authentication", async () => {
-    const response = await request("/admin/");
+  it("serves the admin page only through its Access-protected hostname", async () => {
+    const response = await adminRequest("/admin/");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(await response.text()).toContain("File Transfer 管理");
+  });
+
+  it("blocks admin pages and quota changes on app and preview hostnames", async () => {
+    for (const origin of ["https://file.thanejoss.com", "https://file-transfer.thanejoss.workers.dev"]) {
+      for (const [path, method] of [["/admin", "GET"], ["/admin/", "GET"], ["/admin/admin.js", "GET"], ["/admin/api/users", "GET"], ["/admin/api/users/test/quota", "PUT"]]) {
+        const response = await request(path, { method }, undefined, origin);
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual({ error: "Not found" });
+      }
+    }
+  });
+
+  it("does not enable the local admin exception with production bindings", async () => {
+    const response = await request("/admin/api/users", {}, undefined, "http://localhost:8787");
+    expect(response.status).toBe(404);
   });
 
   it("aggregates usage and updates a user quota", async () => {
@@ -23,7 +42,7 @@ describe("admin page and API", () => {
 
     const from = new Date((now - 60) * 1000).toISOString();
     const to = new Date((now + 60) * 1000).toISOString();
-    const statsResponse = await request(
+    const statsResponse = await adminRequest(
       `/admin/api/stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&bucket=hour`,
     );
     expect(statsResponse.status).toBe(200);
@@ -36,7 +55,7 @@ describe("admin page and API", () => {
       expect.objectContaining({ user_id: account.user.id, service: "stun", quantity: 4096 }),
     );
 
-    const quotaResponse = await request(`/admin/api/users/${account.user.id}/quota`, {
+    const quotaResponse = await adminRequest(`/admin/api/users/${account.user.id}/quota`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ service: "stun", limit: 8192 }),
