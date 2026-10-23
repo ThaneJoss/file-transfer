@@ -1,12 +1,13 @@
 # 部署迁移记录
 
-## 2026-10-24：合并为一个 Worker
+## 2026-10-24：单 Worker、单域名部署
 
 本次配置将网页与 API 合并为一个 `file-transfer` Worker。前端默认请求同源 API，
 不再分别部署静态前端和 API。生产主域名仍为 `https://file.thanejoss.com`。
 
-本节记录合并方案和核验要求；线上切换及旧实例清理的完成情况以对应 GitHub PR 中的
-实际发布记录为准，不以配置文件存在代替部署成功。
+[PR #50](https://github.com/ThaneJoss/file-transfer/pull/50) 已完成单 Worker 上线，
+原独立静态 Worker 和对应构建触发器已删除。本节记录后续统一域名后的配置与核验要求；
+本轮管理路径迁移和旧域名撤除的最终线上证据以对应 GitHub PR 中的实际发布记录为准。
 
 | 配置 | 单 Worker 配置 |
 | --- | --- |
@@ -22,7 +23,7 @@
 | D1 | `file-transfer-api-db`，ID `82649145-9ce8-4c7a-9457-4ba0db3a97cf` |
 | Durable Object | `PICKUP_SESSIONS` / `PickupSession`，namespace `84464ad3a1f047d098f714099aa438ac` |
 | 主站和默认 API | `https://file.thanejoss.com` |
-| 同 Worker 兼容域名 | `https://api.file.thanejoss.com` |
+| 管理页 | `https://file.thanejoss.com/admin/`，沿用 Cloudflare Access 管理员策略 |
 
 ### 资源与切换边界
 
@@ -30,15 +31,16 @@
 原 Runtime Secrets、D1 和 Durable Object namespace 继续使用；无需读取密钥值、
 复制账户数据或重建取件会话。R2 及其生命周期和 CORS 规则保持原配置。
 
-待整合版验证完成后，移除原静态 Worker 身份
+PR #50 上线并验证整合版后，已删除原静态 Worker 身份
 `52bccc12b7d44e6ead68cc4386eb21f4` 及其独立前端触发器。
 保留的生产发布和分支版本上传触发器绑定原 API 的稳定 Worker ID，构建、配置名称和部署命令应与
 改名后的单 Worker 一致。不要删除保留的 API 内部身份来实现改名：删除会影响其实现的
 Durable Object namespace。
 
-旧 API 域名作为同一 Worker 的别名保留，用于旧客户端和已有 Cloudflare Access
-保护的 `/admin/*`。公开站点和其他非管理主机的 `/admin`、`/admin/*` 返回 404，避免管理员
-接口通过新的域名绕过 Access。
+网页、API 和管理页统一使用 `file.thanejoss.com`，旧 API 域名已撤除。
+原 Cloudflare Access 管理员策略迁至主域名的 `/admin` 和 `/admin/*`，包含管理 API；
+站点其他页面与普通 API 保持公开访问。Worker 拒绝其他主机上的管理路径，避免绕过
+Access；本地开发仅在请求主机与 `APP_ORIGIN` 都为 localhost/loopback 时例外。
 
 Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
 默认 API 改为同源后，会话 Cookie 的主机从 API 域名变成主站，已有浏览器会话可能需要
@@ -63,9 +65,10 @@ Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
 ### 发布核验与回滚
 
 发布前检查 lint、类型、单元测试、Worker 集成测试、浏览器 E2E、整合构建、
-绑定类型同步及 Wrangler dry-run。发布后检查主站与旧 API 域名的健康接口、
-同源登录接口、未知 API 的错误响应、SPA 深层路由、静态资源缓存，以及两个域名的
-管理员访问边界。最后确认 GitHub `main` 推送触发的 Workers Build 成功。
+绑定类型同步及 Wrangler dry-run。发布后检查主站的健康接口、同源登录接口、未知
+API 的错误响应、SPA 深层路由和静态资源缓存。确认主域名 `/admin`、`/admin/*` 触发
+Cloudflare Access，其他主机拒绝管理路径，旧 API 域名的 Worker 绑定和 DNS 已撤除。
+最后确认 GitHub `main` 推送触发的 Workers Build 成功。
 
 回滚优先回到经过验证的整合版 Worker 版本或相应 GitHub 提交。
 合并后的回滚应同时考虑页面和 API，不直接回到只含 API 的历史版本，以免主站失去页面。
@@ -101,7 +104,10 @@ Passkey RP ID 一直为 `file.thanejoss.com`，已有 Passkey 仍可使用。
 | API | `7a1d4aee-129e-44e3-81ac-c6026f57ca5b` | `48ed65d3-ec7c-41f5-ad9f-d48154fe2b27` |
 
 当时静态前端的生产触发器 `0df87186-1973-4c3d-a04f-b98e8580892c` 和预览触发器
-`d4ea5c7f-f467-49b5-ba8f-cba74ff2b780` 不属于单 Worker 发布流程，合并清理时应移除。
+`d4ea5c7f-f467-49b5-ba8f-cba74ff2b780` 已在 PR #50 的合并清理中移除。
+
+历史 API 域名为 `api.file.thanejoss.com`。PR #50 合并单 Worker 时曾保留它作为
+旧客户端和管理页的兼容入口；后续统一域名时已撤除，当前只使用 `file.thanejoss.com`。
 
 Vercel 历史部署保留作迁移参考；当时原 DNS 为
 `file.thanejoss.com CNAME cname-cn.vercel-dns.com`，DNS only，TTL 自动。

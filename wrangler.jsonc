@@ -12,10 +12,6 @@
     {
       "pattern": "file.thanejoss.com",
       "custom_domain": true
-    },
-    {
-      "pattern": "api.file.thanejoss.com",
-      "custom_domain": true
     }
   ],
   "observability": {

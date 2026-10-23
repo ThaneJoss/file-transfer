@@ -158,9 +158,10 @@ Cloudflare 的默认 `npx wrangler deploy` 不自动执行 D1 migration，含新
 的提交仍需在生产发布前运行 `pnpm db:migrations:apply:remote`。
 
 原 `file-transfer-api` Worker 通过原地改名保留内部身份、Runtime Secrets 和
-Durable Object namespace，D1 与 R2 沿用原资源。旧地址 `api.file.thanejoss.com`
-作为同一个 Worker 的兼容域名保留，供旧客户端和受 Cloudflare Access 保护的管理页使用。
-公开站点和其他非管理主机不开放 `/admin` 和 `/admin/*`。
+Durable Object namespace，D1 与 R2 沿用原资源。网页与 API 仅使用
+`https://file.thanejoss.com`，旧 API 域名已撤除。
+管理页位于 `https://file.thanejoss.com/admin/`，沿用原 Cloudflare Access 管理员策略；
+该策略覆盖 `/admin` 和 `/admin/*`，其他主机的管理路径返回 404。
 
 Passkey 的 RP ID 仍为 `file.thanejoss.com`，已有 Passkey 可继续使用。
 浏览器会话 Cookie 从旧 API 主机改为站点主机后，现有用户可能需要重新登录一次。

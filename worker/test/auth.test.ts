@@ -6,7 +6,7 @@ import { registrationContextTtlMs, resolveRegistrationContext } from "../src/pas
 
 const { default: app } = await import("../src/index");
 
-const apiOrigin = "https://api.file.thanejoss.com";
+const apiOrigin = "https://file.thanejoss.com";
 const appOrigin = "https://file.thanejoss.com";
 
 type CookieJar = Map<string, string>;

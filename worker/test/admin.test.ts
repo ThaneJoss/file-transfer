@@ -1,22 +1,37 @@
 import { describe, expect, it } from "vitest";
+import type { Bindings } from "../src/types";
 import type { UsageSummaryResponse } from "../src/usage";
 import { bindings, registerUser, request } from "./support";
 
+const { default: app } = await import("../src/index");
+
 function adminRequest(path: string, init: RequestInit = {}) {
-  return request(path, init, undefined, "https://api.file.thanejoss.com");
+  return request(path, init);
 }
 
 describe("admin page and API", () => {
-  it("serves the admin page only through its Access-protected hostname", async () => {
+  it("serves the admin page on the Access-protected app hostname", async () => {
     const response = await adminRequest("/admin/");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(await response.text()).toContain("File Transfer 管理");
   });
 
-  it("blocks admin pages and quota changes on app and preview hostnames", async () => {
-    for (const origin of ["https://file.thanejoss.com", "https://file-transfer.thanejoss.workers.dev"]) {
-      for (const [path, method] of [["/admin", "GET"], ["/admin/", "GET"], ["/admin/admin.js", "GET"], ["/admin/api/users", "GET"], ["/admin/api/users/test/quota", "PUT"]]) {
+  it("blocks admin pages and quota changes on legacy, preview, and unrelated hostnames", async () => {
+    for (const origin of [
+      "https://api.file.thanejoss.com",
+      "https://file-transfer.thanejoss.workers.dev",
+      "https://unrelated.example",
+    ]) {
+      for (const [path, method] of [
+        ["/admin", "GET"],
+        ["/admin/", "GET"],
+        ["/admin/admin.js", "GET"],
+        ["/admin/admin.css", "GET"],
+        ["/admin/api/stats", "GET"],
+        ["/admin/api/users", "GET"],
+        ["/admin/api/users/test/quota", "PUT"],
+      ]) {
         const response = await request(path, { method }, undefined, origin);
         expect(response.status).toBe(404);
         expect(await response.json()).toEqual({ error: "Not found" });
@@ -25,8 +40,24 @@ describe("admin page and API", () => {
   });
 
   it("does not enable the local admin exception with production bindings", async () => {
-    const response = await request("/admin/api/users", {}, undefined, "http://localhost:8787");
-    expect(response.status).toBe(404);
+    for (const origin of ["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"]) {
+      const response = await request("/admin/api/users", {}, undefined, origin);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Not found" });
+    }
+  });
+
+  it("allows loopback admin requests when the app is configured for local development", async () => {
+    const localBindings = {
+      ...bindings,
+      // Wrangler types use the production literal; local dev vars override it.
+      APP_ORIGIN: "http://localhost:5173" as Bindings["APP_ORIGIN"],
+    };
+    for (const origin of ["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"]) {
+      const response = await app.fetch(new Request(`${origin}/admin/`), localBindings);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("File Transfer 管理");
+    }
   });
 
   it("aggregates usage and updates a user quota", async () => {

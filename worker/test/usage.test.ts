@@ -9,7 +9,7 @@ import {
 
 const { default: app } = await import("../src/index");
 
-const apiOrigin = "https://api.file.thanejoss.com";
+const apiOrigin = "https://file.thanejoss.com";
 const appOrigin = "https://file.thanejoss.com";
 const bindings = env as unknown as Bindings;
 
