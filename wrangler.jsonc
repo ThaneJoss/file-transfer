@@ -10,8 +10,8 @@
   "preview_urls": true,
   "routes": [
     {
-      "pattern": "file.thanejoss.com",
-      "custom_domain": true
+      "pattern": "file.thanejoss.com/*",
+      "zone_name": "thanejoss.com"
     }
   ],
   "observability": {
@@ -72,3 +72,4 @@
     ]
   }
 }
+
