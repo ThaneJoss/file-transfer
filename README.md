@@ -134,6 +134,10 @@ GitHub Actions 通过跟随 `github-ci/main` 的通用 reusable CI，自动发�
 | 非生产分支版本上传 | `npx wrangler versions upload` |
 | Root Directory | 仓库根目录 |
 
+生产路由为 `file.thanejoss.com/*`，zone 为 `thanejoss.com`。沿用现有 CNAME →
+`cloudflare-ip.thanejoss.com` 及其代理状态；Wrangler 只同步普通 Worker Route，不创建
+同名 Custom Domain 或接管 DNS。发布后通过现有域名核对 HTTPS、页面与同源 API。
+
 推送 `main` 自动构建并发布整个应用；其他分支自动构建并上传候选版本，不切换生产流量。
 `pnpm build` 同时构建前端并检查 Worker，Cloudflare 注入的 `WORKERS_CI=1`
 不会改变构建目标。仓库只维护一份 Wrangler 配置，以及生产发布和分支版本上传触发器。
@@ -179,3 +183,4 @@ Passkey 的 RP ID 仍为 `file.thanejoss.com`，已有 Passkey 可继续使用�
 - 哈希资源 `/assets/*` 使用长期不可变缓存，页面路由回退到 `index.html`；API、健康检查和管理员路径交给 Worker，未知 API 返回错误而非 SPA HTML。
 - `file.thanejoss.com` 的 Cloudflare Configuration Rule 关闭自动统计脚本注入，保持现有 CSP；模块脚本保留 `data-cfasync="false"`。
 - 临时对象和未完成 multipart 的最终清理由对象存储生命周期规则负责；前端恢复记录只保留 24 小时。
+
