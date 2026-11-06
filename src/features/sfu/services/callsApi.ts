@@ -5,8 +5,13 @@ export type AsyncControl = {
   timeoutMs?: number;
 };
 
+export type CallsRequestOptions = AsyncControl & {
+  pickupCode: string;
+};
+
 export type CallsSession = {
   id: string;
+  readonly pickupCode: string;
   peerConnection: RTCPeerConnection;
 };
 
@@ -40,13 +45,15 @@ export const callsApiOrigin = `${API_BASE_URL}/v1/sfu`;
  */
 export async function callsFetch(
   path: string,
-  init: RequestInit = {},
-  control: AsyncControl = {},
+  init: RequestInit,
+  control: CallsRequestOptions,
 ) {
+  if (!/^\d{8}$/.test(control.pickupCode)) throw new Error("SFU 请求必须绑定有效的 8 位取件码。");
   const timeoutMs = normalizeTimeout(control.timeoutMs, defaultRequestTimeoutMs);
   const scope = createAbortScope(control.signal ?? init.signal ?? undefined, timeoutMs);
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
+  headers.set("X-Pickup-Code", control.pickupCode);
 
   try {
     const data = await apiRequest<CallsApiResponse>(`/v1/sfu${normalizeCallsPath(path)}`, {
@@ -74,12 +81,12 @@ export async function callsFetch(
 
 export async function createCallsSession(
   peerConnection: RTCPeerConnection,
-  control: AsyncControl = {},
+  control: CallsRequestOptions,
 ): Promise<CallsSession> {
   throwIfAborted(control.signal);
   const response = await callsFetch("/sessions/new", { method: "POST" }, control);
   if (!response.sessionId) throw new Error("Cloudflare SFU 没有返回 sessionId。");
-  return { id: response.sessionId, peerConnection };
+  return { id: response.sessionId, pickupCode: control.pickupCode, peerConnection };
 }
 
 export async function establishDataChannelTransport(
@@ -117,7 +124,7 @@ export async function establishDataChannelTransport(
         },
       }),
     },
-    control,
+    { ...control, pickupCode: session.pickupCode },
   );
 
   if (!response.sessionDescription?.sdp) {
@@ -145,7 +152,7 @@ export async function establishDataChannelTransport(
         },
       }),
     },
-    control,
+    { ...control, pickupCode: session.pickupCode },
   );
 }
 
@@ -169,7 +176,7 @@ export async function createPublisherChannel(
         ],
       }),
     },
-    control,
+    { ...control, pickupCode: session.pickupCode },
   );
   throwIfAborted(control.signal);
   return session.peerConnection.createDataChannel(dataChannelName, {
@@ -202,7 +209,7 @@ export async function createSubscriberChannel(
         ],
       }),
     },
-    control,
+    { ...control, pickupCode: session.pickupCode },
   );
   throwIfAborted(control.signal);
   return session.peerConnection.createDataChannel(`${dataChannelName}-subscribed`, {

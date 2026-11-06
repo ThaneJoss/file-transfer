@@ -9,11 +9,13 @@ import {
   getPickup,
   getPickupAnswer,
   getPickupStatus,
+  getPickupSelection,
   monitorPickupCancellation,
   pollPickupSelection,
   publishPickupOffer,
   reservePickup,
   waitForPickupOffer,
+  watchPickupSelections,
 } from "./pickupApi";
 
 describe("pickup API service", () => {
@@ -164,4 +166,35 @@ describe("pickup API service", () => {
       clearPickupGuestAuth();
     }
   });
+  it("sends the last selection version on subsequent long polls and only announces route changes", async () => {
+    const controller = new AbortController();
+    const seen: Array<string | null> = [];
+    const onSelection = vi.fn((selection: { route: string }) => {
+      if (selection.route === "r2") controller.abort(new DOMException("test complete", "AbortError"));
+    });
+    server.use(
+      http.get(`${window.location.origin}/v1/pickups/12345678/selection`, ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("wait")).toBe("20000");
+        seen.push(url.searchParams.get("after"));
+        return HttpResponse.json(seen.length < 3
+          ? { route: "direct", version: 1 }
+          : { route: "r2", version: 2 });
+      }),
+    );
+    await expect(watchPickupSelections("12345678", controller.signal, Date.now() + 10_000, onSelection))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(seen).toEqual([null, "1", "1"]);
+    expect(onSelection.mock.calls.map(([selection]) => selection.route)).toEqual(["direct", "r2"]);
+  });
+
+  it("rejects invalid selection versions rather than sending an invalid cursor", async () => {
+    server.use(
+      http.get(`${window.location.origin}/v1/pickups/12345678/selection`, () =>
+        HttpResponse.json({ route: "direct", version: -1 }),
+      ),
+    );
+    await expect(getPickupSelection("12345678")).rejects.toThrow("取件线路版本格式不正确");
+  });
+
 });

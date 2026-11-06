@@ -17,6 +17,7 @@ type PickupRecord = {
   answer: string | null;
   receiver_user_id: string | null;
   selection_route: PickupRoute | null;
+  selection_version: number | null;
   winner_route: PickupRoute | null;
   winner_bytes: number | null;
   winner_sha256: string | null;
@@ -40,7 +41,7 @@ type AnswerResult =
 type SubmitResult = { status: "ok" | "missing" | "expired" | "pending" | "answered" | "cancelled" };
 
 type SelectionResult =
-  | { status: "found"; route: PickupRoute | null }
+  | { status: "found"; route: PickupRoute | null; version: number }
   | { status: "missing" | "expired" | "forbidden" | "cancelled" };
 
 type SubmitSelectionResult = {
@@ -61,6 +62,10 @@ type StatusResult =
   | { status: "found"; cancelled: boolean; expiresAt: number }
   | { status: "missing" | "expired" | "forbidden" };
 
+export type SfuAccessResult = {
+  status: "ok" | "missing" | "expired" | "cancelled" | "pending" | "forbidden";
+};
+
 export class PickupSession extends DurableObject<Bindings> {
   private readonly changeWaiters = new Set<() => void>();
   private changeVersion = 0;
@@ -77,6 +82,7 @@ export class PickupSession extends DurableObject<Bindings> {
           answer TEXT,
           receiver_user_id TEXT,
           selection_route TEXT,
+          selection_version INTEGER NOT NULL DEFAULT 0,
           winner_route TEXT,
           winner_bytes INTEGER,
           winner_sha256 TEXT,
@@ -85,7 +91,14 @@ export class PickupSession extends DurableObject<Bindings> {
           created_at INTEGER NOT NULL
         )
       `);
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS pickup_sfu_session (
+          session_id TEXT PRIMARY KEY,
+          actor_id TEXT NOT NULL
+        )
+      `);
       this.addColumnIfMissing("selection_route", "TEXT");
+      this.addColumnIfMissing("selection_version", "INTEGER");
       this.addColumnIfMissing("winner_route", "TEXT");
       this.addColumnIfMissing("winner_bytes", "INTEGER");
       this.addColumnIfMissing("winner_sha256", "TEXT");
@@ -104,6 +117,7 @@ export class PickupSession extends DurableObject<Bindings> {
     if (current && current.expires_at > now) return false;
 
     this.ctx.storage.sql.exec("DELETE FROM pickup_session");
+    this.ctx.storage.sql.exec("DELETE FROM pickup_sfu_session");
     this.ctx.storage.sql.exec(
       `INSERT INTO pickup_session
          (singleton, sender_user_id, variant, offer, answer, receiver_user_id,
@@ -212,7 +226,7 @@ export class PickupSession extends DurableObject<Bindings> {
     if (record.selection_route === route) return { status: "ok" };
 
     const result = this.ctx.storage.sql.exec(
-      "UPDATE pickup_session SET selection_route = ? WHERE singleton = 1 AND winner_route IS NULL",
+      "UPDATE pickup_session SET selection_route = ?, selection_version = COALESCE(selection_version, 0) + 1 WHERE singleton = 1 AND winner_route IS NULL",
       route,
     );
     if (result.rowsWritten === 1) {
@@ -222,14 +236,20 @@ export class PickupSession extends DurableObject<Bindings> {
     return { status: "won" };
   }
 
-  async getSelection(receiverUserId: string, waitMs = 0): Promise<SelectionResult> {
-    const observedVersion = this.changeVersion;
-    let result = this.readSelection(receiverUserId);
-    if (result.status === "found" && result.route === null && waitMs > 0) {
-      await this.waitForChange(waitMs, observedVersion);
-      result = this.readSelection(receiverUserId);
+  async getSelection(receiverUserId: string, waitMs = 0, afterVersion?: number): Promise<SelectionResult> {
+    const deadline = Date.now() + waitMs;
+    while (true) {
+      // Observe before reading so a change between the read and waiter registration
+      // cannot be missed. The public cursor is persisted separately from wakeups.
+      const observedVersion = this.changeVersion;
+      const result = this.readSelection(receiverUserId);
+      const remaining = deadline - Date.now();
+      if (
+        result.status !== "found" || remaining <= 0 ||
+        (result.route !== null && (afterVersion === undefined || result.version !== afterVersion))
+      ) return result;
+      await this.waitForChange(remaining, observedVersion);
     }
-    return result;
   }
 
   private readSelection(receiverUserId: string): SelectionResult {
@@ -237,7 +257,7 @@ export class PickupSession extends DurableObject<Bindings> {
     if (!record) return this.readRecord() ? { status: "expired" } : { status: "missing" };
     if (record.receiver_user_id !== receiverUserId) return { status: "forbidden" };
     if (record.cancelled_at !== null) return { status: "cancelled" };
-    return { status: "found", route: record.selection_route };
+    return { status: "found", route: record.selection_route, version: record.selection_version ?? 0 };
   }
 
   async submitWinner(receiverUserId: string, winner: PickupWinner): Promise<SubmitWinnerResult> {
@@ -334,8 +354,64 @@ export class PickupSession extends DurableObject<Bindings> {
     };
   }
 
+  authorizeSfu(
+    actorId: string,
+    sessionId?: string,
+    remoteSessionIds: string[] = [],
+  ): SfuAccessResult {
+    const record = this.readActiveRecord();
+    if (!record) return { status: this.readRecord() ? "expired" : "missing" };
+    if (record.cancelled_at !== null) return { status: "cancelled" };
+
+    const isSender = record.sender_user_id === actorId;
+    if (!isSender) {
+      if (record.receiver_user_id !== null && record.receiver_user_id !== actorId) {
+        return { status: "forbidden" };
+      }
+      // Receivers prepare their SFU connection before submitting the Answer.
+      // The sender may prepare before publishing its Offer.
+      if (!record.offer) return { status: "pending" };
+    }
+    if (sessionId !== undefined && this.readSfuSessionOwner(sessionId) !== actorId) {
+      return { status: "forbidden" };
+    }
+
+    const peerId = isSender ? record.receiver_user_id : record.sender_user_id;
+    for (const remoteSessionId of remoteSessionIds) {
+      const owner = this.readSfuSessionOwner(remoteSessionId);
+      // A signed-in user may also receive their own transfer on another device.
+      if (owner === undefined || (owner !== actorId && owner !== peerId)) {
+        return { status: "forbidden" };
+      }
+    }
+    return { status: "ok" };
+  }
+
+  registerSfuSession(actorId: string, sessionId: string): SfuAccessResult {
+    // Recheck after the upstream creation request: the pickup may have expired,
+    // been cancelled, or bound a different receiver while that request ran.
+    const access = this.authorizeSfu(actorId);
+    if (access.status !== "ok") return access;
+    const owner = this.readSfuSessionOwner(sessionId);
+    if (owner !== undefined) return { status: owner === actorId ? "ok" : "forbidden" };
+    this.ctx.storage.sql.exec(
+      "INSERT INTO pickup_sfu_session (session_id, actor_id) VALUES (?, ?)",
+      sessionId,
+      actorId,
+    );
+    return { status: "ok" };
+  }
+
+  private readSfuSessionOwner(sessionId: string) {
+    return this.ctx.storage.sql.exec<{ actor_id: string }>(
+      "SELECT actor_id FROM pickup_sfu_session WHERE session_id = ?",
+      sessionId,
+    ).toArray()[0]?.actor_id;
+  }
+
   async alarm(): Promise<void> {
     this.ctx.storage.sql.exec("DELETE FROM pickup_session WHERE expires_at <= ?", Date.now());
+    if (!this.readActiveRecord()) this.ctx.storage.sql.exec("DELETE FROM pickup_sfu_session");
     this.notifyChangeWaiters();
   }
 

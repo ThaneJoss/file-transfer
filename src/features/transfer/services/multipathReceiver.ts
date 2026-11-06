@@ -155,7 +155,7 @@ export async function runMultipathReceiver({
           "SFU 应答",
           (routeSignal) => prepareSfuReceiver(
             sfuOffer.descriptor as unknown as SfuSenderDescriptor,
-            { signal: routeSignal, timeoutMs: 5_000 },
+            { pickupCode: code, signal: routeSignal, timeoutMs: 5_000 },
           ),
         ))
       : Promise.resolve(null);

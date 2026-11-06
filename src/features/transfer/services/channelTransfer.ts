@@ -75,28 +75,22 @@ export async function sendFileOnChannel({
 }) {
   throwIfAborted(signal);
   await waitForChannelOpen(route.channel, signal);
-  const waitController = linkedAbortController(signal);
-  type CompletionMessage = Extract<TransferControlMessage, { kind: "transfer-complete" | "transfer-error" }>;
-  let earlyCompletion: CompletionMessage | null = null;
-  const completion = waitForControl(route.channel, waitController.signal, (message): message is CompletionMessage =>
-    (message.kind === "transfer-complete" || message.kind === "transfer-error") && message.transferId === offer.transferId,
-  ).then((message) => { earlyCompletion = message; return message; });
-  void completion.catch(() => undefined);
-  const acknowledgements = createChunkAckTracker(route.channel, offer.transferId, waitController.signal);
+  const acknowledgements = createChunkAckTracker(route.channel, offer.transferId, signal);
   try {
     let sent = 0;
     onProgress?.(0, offer.file.size);
     for (let sequence = 0; sequence < offer.file.totalChunks; sequence += 1) {
       throwIfAborted(signal);
-      if (earlyCompletion) break;
-      await acknowledgements.waitForCredit(sequence);
+      if (!await acknowledgements.waitForCredit(sequence)) break;
       const start = sequence * offer.file.chunkSize;
       const chunk = new Uint8Array(await file.slice(start, Math.min(start + offer.file.chunkSize, offer.file.size)).arrayBuffer());
+      if (!acknowledgements.markSent(sequence)) break;
       await sendWithBackpressure(route.channel, encodeFileFrame("data", sequence, chunk), signal);
       sent += chunk.byteLength;
       onProgress?.(sent, offer.file.size);
     }
-    if (!earlyCompletion) {
+    throwIfAborted(signal);
+    if (!acknowledgements.isComplete) {
       route.channel.send(encodeControlMessage({
         kind: "transfer-done",
         transferId: offer.transferId,
@@ -104,14 +98,13 @@ export async function sendFileOnChannel({
         sha256: offer.file.sha256,
       }));
     }
-    const result = await completion;
+    const result = await acknowledgements.waitForCompletion();
     if (result.kind === "transfer-error") throw new Error(result.message);
     if (result.sha256 !== offer.file.sha256 || result.bytes !== offer.file.size) throw new Error("接收端返回了无效的完整性确认。");
     onProgress?.(offer.file.size, offer.file.size);
     return result;
   } finally {
     acknowledgements.dispose();
-    waitController.abort(new DOMException("线路发送已结束。", "AbortError"));
   }
 }
 
@@ -335,25 +328,62 @@ export async function waitForChannelOpen(channel: RTCDataChannel, signal: AbortS
 
 function createChunkAckTracker(channel: RTCDataChannel, transferId: string, signal: AbortSignal) {
   const maxInFlightChunks = 32;
+  const progressTimeoutMs = 30_000;
+  type CompletionMessage = Extract<TransferControlMessage, { kind: "transfer-complete" | "transfer-error" }>;
   let highestAcknowledged = -1;
+  let highestSent = -1;
   let failure: Error | null = null;
+  let result: CompletionMessage | null = null;
+  let awaitingCompletion = false;
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  let resolveCompletion!: (message: CompletionMessage) => void;
+  let rejectCompletion!: (error: Error) => void;
+  const completion = new Promise<CompletionMessage>((resolve, reject) => {
+    resolveCompletion = resolve;
+    rejectCompletion = reject;
+  });
+  // A route can time out while its caller is still reading the next file slice.
+  void completion.catch(() => undefined);
   const waiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
+  const clearTimer = () => {
+    if (timer !== undefined) globalThis.clearTimeout(timer);
+    timer = undefined;
+  };
   const wake = () => {
     for (const waiter of waiters) waiter.resolve();
     waiters.clear();
   };
   const fail = (error: Error) => {
-    if (failure) return;
+    if (failure || result) return;
     failure = error;
+    clearTimer();
+    rejectCompletion(error);
     for (const waiter of waiters) waiter.reject(error);
     waiters.clear();
   };
+  const resetProgressTimer = () => {
+    clearTimer();
+    timer = globalThis.setTimeout(() => fail(new Error(
+      awaitingCompletion ? "等待接收端完成确认超时。" : "等待接收端分块确认超时。",
+    )), progressTimeoutMs);
+  };
   const onMessage = (event: MessageEvent) => {
-    if (typeof event.data !== "string") return;
+    if (typeof event.data !== "string" || failure || result) return;
     try {
       const message = decodeControlMessage(event.data);
-      if (message.kind !== "chunk-ack" || message.transferId !== transferId) return;
-      highestAcknowledged = Math.max(highestAcknowledged, message.sequence);
+      if (message.transferId !== transferId) return;
+      if (message.kind === "transfer-complete" || message.kind === "transfer-error") {
+        result = message;
+        clearTimer();
+        resolveCompletion(message);
+        wake();
+        return;
+      }
+      if (message.kind !== "chunk-ack" || message.sequence <= highestAcknowledged || message.sequence > highestSent) return;
+      highestAcknowledged = message.sequence;
+      // Only acknowledgement of newly sent data extends the progress deadline.
+      if (highestAcknowledged < highestSent || awaitingCompletion) resetProgressTimer();
+      else clearTimer();
       wake();
     } catch { /* another listener owns this message */ }
   };
@@ -362,18 +392,39 @@ function createChunkAckTracker(channel: RTCDataChannel, transferId: string, sign
   channel.addEventListener("message", onMessage);
   channel.addEventListener("close", onClose, { once: true });
   signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  else if (channel.readyState === "closing" || channel.readyState === "closed") onClose();
 
   return {
+    get isComplete() { return result !== null; },
     async waitForCredit(sequence: number) {
-      while (sequence - highestAcknowledged > maxInFlightChunks) {
+      while (!result && sequence - highestAcknowledged > maxInFlightChunks) {
         if (failure) throw failure;
         await new Promise<void>((resolve, reject) => waiters.add({ resolve, reject }));
       }
+      if (failure) throw failure;
+      return result === null;
+    },
+    markSent(sequence: number) {
+      if (failure) throw failure;
+      if (result) return false;
+      highestSent = sequence;
+      if (timer === undefined) resetProgressTimer();
+      return true;
+    },
+    waitForCompletion() {
+      if (!failure && !result) {
+        awaitingCompletion = true;
+        // This is a separate inactivity deadline, never a whole-file time limit.
+        resetProgressTimer();
+      }
+      return completion;
     },
     dispose() {
       channel.removeEventListener("message", onMessage);
       channel.removeEventListener("close", onClose);
       signal.removeEventListener("abort", onAbort);
+      clearTimer();
       fail(new DOMException("分块确认等待已结束。", "AbortError"));
     },
   };
