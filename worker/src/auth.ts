@@ -105,12 +105,15 @@ export function createAuth(env: Bindings) {
             if (existingUser) {
               throw new APIError("BAD_REQUEST", { message: "Registration context already used" });
             }
-            const createdUser = await ctx.context.internalAdapter.createUser({
-              id: identity.userId,
-              name: identity.name,
-              email: identity.email,
-              emailVerified: true,
-            });
+            const createdUser = await ctx.context.internalAdapter.createUser(
+              {
+                id: identity.userId,
+                name: identity.name,
+                email: identity.email,
+                emailVerified: true,
+              },
+              { method: "passkey" },
+            );
             return { userId: createdUser.id };
           },
         },
