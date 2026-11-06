@@ -14,7 +14,8 @@ import { consumeGuestClaimRateLimit, issuePickupGuestToken } from "./guest";
 import { createRegistrationContext, normalizeRegistrationName } from "./passkey-registration";
 import { createPickup, isPickupRoute, isPickupVariant, pickupCodePattern } from "./pickups";
 import { isOwnedR2ObjectKey, issueR2Credentials } from "./services/r2";
-import { matchSfuRoute, proxySfuRequest } from "./services/sfu";
+import { matchSfuRoute, parseSfuRemoteSessionIds, proxySfuRequest } from "./services/sfu";
+import type { SfuAccessResult } from "./durable/pickup-session";
 import { issueTurnCredentials } from "./services/turn";
 import { requireSessionOrPickupGuest } from "./session";
 import type { AppEnv, Bindings } from "./types";
@@ -157,7 +158,7 @@ app.use(
 
       return allowedOrigins(c.env).includes(origin) ? origin : undefined;
     },
-    allowHeaders: ["Content-Type", "Authorization", "X-Pickup-Guest-Token"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Pickup-Guest-Token", "X-Pickup-Code"],
     allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     credentials: true,
@@ -348,12 +349,17 @@ app.get("/v1/pickups/:code/selection", async (c) => {
   if (!pickupCodePattern.test(code)) return c.json({ error: "Pickup code must contain exactly 8 digits" }, 400);
   const waitMs = waitMilliseconds(c);
   if (waitMs === null) return c.json({ error: "wait must be an integer from 0 to 25000 milliseconds" }, 400);
+  const afterQuery = c.req.query("after");
+  const afterVersion = afterQuery === undefined ? undefined : Number(afterQuery);
+  if (afterQuery !== undefined && (!/^\d+$/.test(afterQuery) || !Number.isSafeInteger(afterVersion))) {
+    return c.json({ error: "after must be a non-negative safe integer" }, 400);
+  }
   const { userId } = c.get("auth");
-  const result = await c.env.PICKUP_SESSIONS.getByName(code).getSelection(userId, waitMs);
+  const result = await c.env.PICKUP_SESSIONS.getByName(code).getSelection(userId, waitMs, afterVersion);
   await recordPickupUsage(c, "get_selection");
   if (result.status === "forbidden") return c.json({ error: "Pickup code is not bound to this receiver" }, 403);
   if (result.status === "cancelled") return c.json({ error: "Pickup transfer was cancelled" }, 410);
-  if (result.status === "found" && result.route !== null) return c.json({ route: result.route });
+  if (result.status === "found" && result.route !== null) return c.json({ route: result.route, version: result.version });
   if (result.status === "found") return c.json({ error: "Pickup route not selected yet" }, 404);
   return c.json({ error: "Pickup code not found or expired" }, 404);
 });
@@ -630,6 +636,14 @@ app.post("/v1/diagnostics/transfers", async (c) => {
   return c.json({ accepted: true }, 202);
 });
 
+function sfuAccessError(c: Context<AppEnv>, result: SfuAccessResult) {
+  if (result.status === "ok") return null;
+  if (result.status === "forbidden") return c.json({ error: "SFU session does not belong to this pickup participant" }, 403);
+  if (result.status === "pending") return c.json({ error: "Pickup offer is not ready" }, 409);
+  if (result.status === "cancelled") return c.json({ error: "Pickup transfer was cancelled" }, 410);
+  return c.json({ error: "Pickup code not found or expired" }, 404);
+}
+
 app.all("/v1/sfu/*", async (c) => {
   const path = c.req.path.slice("/v1/sfu".length);
   const route = matchSfuRoute(path, c.req.method);
@@ -638,6 +652,15 @@ app.all("/v1/sfu/*", async (c) => {
   }
   if (!c.req.header("content-type")?.toLowerCase().startsWith("application/json")) {
     return c.json({ error: "Content-Type must be application/json" }, 415);
+  }
+
+  const pickupCode = c.req.header("x-pickup-code")?.trim();
+  if (!pickupCode || !pickupCodePattern.test(pickupCode)) {
+    return c.json({ error: "X-Pickup-Code must contain exactly 8 digits" }, 400);
+  }
+  const auth = c.get("auth");
+  if (auth.kind === "guest" && auth.pickupCode !== pickupCode) {
+    return c.json({ error: "Pickup guest token does not match X-Pickup-Code" }, 403);
   }
 
   const declaredLength = Number(c.req.header("content-length") ?? "0");
@@ -650,8 +673,25 @@ app.all("/v1/sfu/*", async (c) => {
     return c.json({ error: "Request body too large" }, 413);
   }
 
+  const remoteSessionIds = parseSfuRemoteSessionIds(body, path);
+  if (remoteSessionIds === null) return c.json({ error: "Invalid SFU request body or session reference" }, 400);
+  const pickup = c.env.PICKUP_SESSIONS.getByName(pickupCode);
+  const accessError = sfuAccessError(
+    c,
+    await pickup.authorizeSfu(auth.userId, route.sessionId, remoteSessionIds),
+  );
+  if (accessError) return accessError;
+
   try {
     const response = await proxySfuRequest(c.env, path, route.method, body);
+    if (route.sessionId === undefined && response.ok) {
+      const created = await response.clone().json<{ sessionId?: unknown }>();
+      if (typeof created.sessionId !== "string" || !/^[A-Za-z0-9_-]+$/.test(created.sessionId)) {
+        throw new Error("SFU did not return a valid sessionId");
+      }
+      const registrationError = sfuAccessError(c, await pickup.registerSfuSession(auth.userId, created.sessionId));
+      if (registrationError) return registrationError;
+    }
 
     return new Response(response.body, {
       status: response.status,

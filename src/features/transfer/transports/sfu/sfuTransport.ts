@@ -4,7 +4,7 @@ import {
   createSubscriberChannel,
   establishDataChannelTransport,
 } from "../../../sfu/services/callsApi";
-import type { AsyncControl, CallsSession } from "../../../sfu/services/callsApi";
+import type { AsyncControl, CallsRequestOptions, CallsSession } from "../../../sfu/services/callsApi";
 
 export const sfuSenderDescriptorKind = "cloudflare-calls-datachannel-duplex-v2" as const;
 export const sfuReceiverDescriptorKind = "cloudflare-calls-datachannel-duplex-answer-v2" as const;
@@ -26,7 +26,7 @@ export type SfuReceiverDescriptor = {
   dataChannelName: string;
 };
 
-export type SfuTransportOptions = AsyncControl & {
+export type SfuTransportOptions = CallsRequestOptions & {
   dataChannelName?: string;
   peerConnectionFactory?: (configuration: RTCConfiguration) => RTCPeerConnection;
 };
@@ -67,7 +67,7 @@ const peerConfiguration: RTCConfiguration = {
 };
 
 export async function prepareSfuSender(
-  options: SfuTransportOptions = {},
+  options: SfuTransportOptions,
 ): Promise<SfuSenderSession> {
   const peer = createPeer(options.peerConnectionFactory);
   let outbound: RTCDataChannel | null = null;
@@ -133,7 +133,7 @@ export async function prepareSfuSender(
 
 export async function prepareSfuReceiver(
   descriptor: SfuSenderDescriptor,
-  options: SfuTransportOptions = {},
+  options: SfuTransportOptions,
 ): Promise<SfuReceiverSession> {
   validateSenderDescriptor(descriptor);
   const peer = createPeer(options.peerConnectionFactory);
