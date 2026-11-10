@@ -311,7 +311,7 @@ describe("pickup code API", () => {
     expect(await updatedSelection.json()).toEqual({ accepted: true });
 
     const readSelection = await request(`/v1/pickups/${pickup.code}/selection`, {}, receiver.jar);
-    expect(await readSelection.json()).toEqual({ route: "r2" });
+    expect(await readSelection.json()).toEqual({ route: "r2", version: 2 });
 
     const winnerCandidates = [
       { route: "stun", bytes: 12_345, sha256: "AB".repeat(32) },
@@ -642,7 +642,7 @@ describe("pickup code API", () => {
       { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ route: "direct" }) },
       sender.jar,
     );
-    expect(await (await waitingSelection).json()).toEqual({ route: "direct" });
+    expect(await (await waitingSelection).json()).toEqual({ route: "direct", version: 1 });
 
     const waitingWinner = request(`/v1/pickups/${pickup.code}/winner?wait=5000`, {}, sender.jar);
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -741,7 +741,7 @@ describe("pickup code API", () => {
       sender.jar,
     );
     const selection = await request(`/v1/pickups/${pickup.code}/selection`, { headers: guestHeaders });
-    expect(await selection.json()).toEqual({ route: "r2" });
+    expect(await selection.json()).toEqual({ route: "r2", version: 1 });
     const winner = { route: "r2", bytes: 10, sha256: "cd".repeat(32) };
     const completion = await request(`/v1/pickups/${pickup.code}/winner`, {
       method: "PUT",

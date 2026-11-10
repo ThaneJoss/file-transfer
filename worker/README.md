@@ -250,7 +250,7 @@ curl https://file.thanejoss.com/health
 - `PUT /v1/pickups/{code}/answer`，写入 Answer
 - `GET /v1/pickups/{code}/answer`，发送方读取 Answer，支持 `?wait=0..25000`
 - `PUT /v1/pickups/{code}/selection`，发送方发布或更新当前激活的多路传输路线
-- `GET /v1/pickups/{code}/selection`，已绑定接收方读取选定路线，支持 `?wait=0..25000`
+- `GET /v1/pickups/{code}/selection`，已绑定接收方读取选定路线，支持 `?wait=0..25000&after={version}`
 - `PUT /v1/pickups/{code}/winner`，已绑定接收方一次性确认完成校验的获胜路线
 - `GET /v1/pickups/{code}/winner`，发送方读取获胜路线和完整性结果，支持 `?wait=0..25000`
 - `PUT /v1/pickups/{code}/cancel`，发送方或已绑定接收方取消传输
@@ -262,7 +262,7 @@ curl https://file.thanejoss.com/health
 
 多路协调接口在状态尚未产生时返回 `404`。写入 selection 或 winner 成功时返回
 `{"accepted":true}`。selection 在 winner 产生前可更新，同一路线重试幂等；完全相同的 winner
-重试也幂等成功，冲突 winner 或 winner 产生后再更新 selection 返回 `409`。selection 读取结果为 `{"route":"direct"}`；
+重试也幂等成功，冲突 winner 或 winner 产生后再更新 selection 返回 `409`。selection 读取结果为 `{"route":"direct","version":1}`；接收方在后续请求携带 `after`，版本未变化时等待换路、取消或超时。同一路线的幂等写入不递增版本，版本存储在 Pickup 的 SQLite 中。省略 `after` 的旧客户端仍可立即读取已选路线；
 winner 读取结果为 `{"route":"direct","bytes":123,"sha256":"..."}`。Pickup 的 Offer 和
 Answer 最多各为 384 KiB（按 UTF-8 字节计）。
 取消接口可幂等重试。取消后，Offer、Answer、selection 和 winner 的读写都返回 `410`，接收端可通过
@@ -357,6 +357,8 @@ pnpm worker:dry-run
 测试覆盖访客权限边界与限流数据、对象 key 所有权、Offer/Answer/selection/winner/status
 长轮询唤醒、取消、幂等 winner 和五类已验证用量。Cloudflare Worker 测试池首次启动较重，
 在低内存主机上应串行执行并给初始化预留时间。
+
+SFU 请求必须携带 `X-Pickup-Code`；访客令牌也必须属于该取件码。Pickup Durable Object 保存 SFU 会话与调用者的归属，只有会话所有者可以修改目标会话，远端订阅限定同次传输的授权对端。接收方可在提交 Answer 前准备自己的会话；Answer 绑定接收方后，其他候选接收方不再有控制权限。取消、过期和取件码重用后，旧会话授权失效。SFU 会话归属表随现有 DO 初始化建立，无需新的 D1 migration 或平台绑定。
 
 SFU 代理路径与 Cloudflare Realtime 的应用内路径一致，例如：
 

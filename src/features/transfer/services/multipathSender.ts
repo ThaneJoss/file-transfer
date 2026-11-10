@@ -121,7 +121,7 @@ export async function runMultipathSender({
       signal,
       routePreparationTimeoutMs,
       "SFU 准备",
-      (routeSignal) => prepareSfuSender({ signal: routeSignal, timeoutMs: 5_000 }),
+      (routeSignal) => prepareSfuSender({ pickupCode: pickup.code, signal: routeSignal, timeoutMs: 5_000 }),
     ).then((session) => {
       sfuSession = session;
       return session;

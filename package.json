@@ -20,6 +20,7 @@
     "test": "pnpm test:unit",
     "test:unit": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts",
+    "test:worker:browser": "playwright test --config playwright.worker.config.ts",
     "test:unit:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
@@ -41,11 +42,11 @@
     "deploy": "pnpm build && pnpm db:migrations:apply:remote && wrangler deploy"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "^1.6.25",
-    "@better-auth/passkey": "1.6.25",
+    "@better-auth/drizzle-adapter": "^1.7.18",
+    "@better-auth/passkey": "1.7.18",
     "@noble/hashes": "2.2.0",
     "aws4fetch": "^1.0.20",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.18",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.13",
     "jose": "^6.2.4",
@@ -56,8 +57,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
-    "@cloudflare/vitest-pool-workers": "^0.18.8",
-    "@cloudflare/workers-types": "^5.20260726.1",
+    "@cloudflare/vitest-plugin": "1.4.8",
+    "@cloudflare/workers-types": "5.20261023.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -80,6 +81,6 @@
     "typescript-eslint": "^8.71.1",
     "vite": "^8.3.5",
     "vitest": "^4.1.12",
-    "wrangler": "^4.114.0"
+    "wrangler": "4.153.0"
   }
 }

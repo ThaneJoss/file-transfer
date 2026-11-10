@@ -99,23 +99,28 @@ describe("SFU duplex transport session", () => {
   let nextSession: number;
   let nextChannelId: number;
   const channelRequests: unknown[] = [];
+  const pickupScopes: Array<string | null> = [];
 
   beforeEach(() => {
     vi.useRealTimers();
     nextSession = 0;
     nextChannelId = 0;
     channelRequests.length = 0;
+    pickupScopes.length = 0;
     server.use(
-      http.post(`${window.location.origin}/v1/sfu/sessions/new`, () =>
-        HttpResponse.json({ sessionId: `session-${++nextSession}` }),
-      ),
-      http.post(`${window.location.origin}/v1/sfu/sessions/:sessionId/datachannels/establish`, () =>
-        HttpResponse.json({
+      http.post(`${window.location.origin}/v1/sfu/sessions/new`, ({ request }) => {
+        pickupScopes.push(request.headers.get("x-pickup-code"));
+        return HttpResponse.json({ sessionId: `session-${++nextSession}` });
+      }),
+      http.post(`${window.location.origin}/v1/sfu/sessions/:sessionId/datachannels/establish`, ({ request }) => {
+        pickupScopes.push(request.headers.get("x-pickup-code"));
+        return HttpResponse.json({
           sessionDescription: { type: "answer", sdp: "cloudflare-answer" },
           requiresImmediateRenegotiation: false,
-        }),
-      ),
+        });
+      }),
       http.post(`${window.location.origin}/v1/sfu/sessions/:sessionId/datachannels/new`, async ({ request }) => {
+        pickupScopes.push(request.headers.get("x-pickup-code"));
         channelRequests.push(await request.json());
         return HttpResponse.json({ dataChannels: [{ id: ++nextChannelId }] });
       }),
@@ -125,6 +130,7 @@ describe("SFU duplex transport session", () => {
   it("builds two one-way channels into a duplex facade in both directions", async () => {
     const senderPeer = new FakePeerConnection();
     const sender = await prepareSfuSender({
+      pickupCode: "12345678",
       dataChannelName: "file-forward",
       peerConnectionFactory: () => senderPeer as unknown as RTCPeerConnection,
     });
@@ -137,6 +143,7 @@ describe("SFU duplex transport session", () => {
 
     const receiverPeer = new FakePeerConnection();
     const receiver = await prepareSfuReceiver(sender.descriptor, {
+      pickupCode: "12345678",
       dataChannelName: "file-reverse",
       peerConnectionFactory: () => receiverPeer as unknown as RTCPeerConnection,
     });
@@ -151,6 +158,8 @@ describe("SFU duplex transport session", () => {
     await expect(sender.ready).resolves.toBe(sender.channel);
     expect(sender.channel.readyState).toBe("open");
     expect(receiver.channel.readyState).toBe("open");
+    // Includes the sender's reverse subscription made after acceptAnswer.
+    expect(pickupScopes).toEqual(Array(8).fill("12345678"));
 
     const senderForward = senderPeer.channel("file-forward");
     const receiverForward = receiverPeer.channel("file-forward-subscribed");
@@ -219,6 +228,7 @@ describe("SFU duplex transport session", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const peer = new FakePeerConnection();
     const sender = await prepareSfuSender({
+      pickupCode: "12345678",
       dataChannelName: "file-keepalive",
       peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
     });
@@ -238,6 +248,7 @@ describe("SFU duplex transport session", () => {
     const controller = new AbortController();
     const peer = new FakePeerConnection();
     const sender = await prepareSfuSender({
+      pickupCode: "12345678",
       signal: controller.signal,
       dataChannelName: "file-abort",
       peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
@@ -258,6 +269,7 @@ describe("SFU duplex transport session", () => {
   it("closes a half-built session when channel readiness times out", async () => {
     const peer = new FakePeerConnection(false);
     await expect(prepareSfuSender({
+      pickupCode: "12345678",
       timeoutMs: 5,
       dataChannelName: "file-timeout",
       peerConnectionFactory: () => peer as unknown as RTCPeerConnection,

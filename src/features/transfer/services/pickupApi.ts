@@ -157,14 +157,20 @@ export async function setPickupSelection(code: string, route: TransferMethod, si
   );
 }
 
-export async function getPickupSelection(code: string, signal?: AbortSignal, waitMs = 0) {
-  const waitQuery = waitMs > 0 ? `?wait=${Math.min(25_000, Math.floor(waitMs))}` : "";
-  const result = await apiRequest<{ route: unknown }>(
-    `/v1/pickups/${encodeURIComponent(code)}/selection${waitQuery}`,
+export async function getPickupSelection(code: string, signal?: AbortSignal, waitMs = 0, afterVersion?: number) {
+  const query = new URLSearchParams();
+  if (waitMs > 0) query.set("wait", String(Math.min(25_000, Math.floor(waitMs))));
+  if (afterVersion !== undefined) query.set("after", String(afterVersion));
+  const suffix = query.size ? `?${query.toString()}` : "";
+  const result = await apiRequest<{ route: unknown; version?: unknown }>(
+    `/v1/pickups/${encodeURIComponent(code)}/selection${suffix}`,
     { cache: "no-store", signal },
   );
   if (!isTransferMethod(result.route)) throw new Error("取件线路响应格式不正确。");
-  return { route: result.route };
+  if (result.version !== undefined && (
+    typeof result.version !== "number" || !Number.isSafeInteger(result.version) || result.version < 0
+  )) throw new Error("取件线路版本格式不正确。");
+  return { route: result.route, ...(typeof result.version === "number" ? { version: result.version } : {}) };
 }
 
 export async function setPickupWinner(code: string, winner: PickupWinner, signal?: AbortSignal) {
@@ -230,15 +236,18 @@ export async function watchPickupSelections(
   onSelection: (selection: { route: TransferMethod }) => void | Promise<void>,
 ): Promise<never> {
   let previous: TransferMethod | null = null;
+  let afterVersion: number | undefined;
   while (true) {
     if (signal.aborted) throw abortReason(signal);
     if (Date.now() >= expiresAt) throw new Error("取件码已经过期，请重新生成。");
-    const selection = await readCoordinationRetryable(() => pending404(() => getPickupSelection(code, signal, 20_000)));
+    const selection = await readCoordinationRetryable(() => pending404(() => getPickupSelection(code, signal, 20_000, afterVersion)));
+    if (selection?.version !== undefined) afterVersion = selection.version;
     if (selection && selection.route !== previous) {
       previous = selection.route;
       await onSelection(selection);
     }
-    await abortableDelay(100, signal);
+    // Older servers omit cursors; avoid a hot loop during a rolling update.
+    await abortableDelay(afterVersion === undefined ? 1_000 : 100, signal);
   }
 }
 
